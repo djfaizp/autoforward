@@ -4,9 +4,12 @@ import json
 import logging
 from telethon import events
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 from telethon.errors import ChannelPrivateError, UserNotParticipantError
 >>>>>>> 495dcb0 (skip duplicate)
+=======
+>>>>>>> 68c46eb (bug fix source and destinaation channel set command)
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -139,7 +142,11 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
             await event.reply("Invalid destination channel format. Please use: /set_destination <channel_id>")
         except Exception as e:
             logger.error(f"Unexpected error in /set_destination command: {str(e)}", exc_info=True)
+<<<<<<< HEAD
             await event.reply("An unexpected error occurred. Please try again later.")
+=======
+            await event.reply("An unexpected error occurred. Please try again later.")             
+>>>>>>> 68c46eb (bug fix source and destinaation channel set command)
 
     @bot.on(events.NewMessage(pattern='/status'))
     async def status_command(event):
