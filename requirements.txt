@@ -1,5 +1,6 @@
 telethon
 python-dotenv
-pydantic
+pydantic-settings
 pymongo
+aiosqlite
 motor

@@ -1,4 +1,3 @@
-# user_client.py
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import logging
@@ -9,7 +8,7 @@ class UserClient:
     def __init__(self):
         self.client = None
 
-    async def start(self, api_id, api_hash, session_string=None):
+    async def start(self, api_id: int, api_hash: str, session_string: str = None):
         try:
             if session_string:
                 self.client = TelegramClient(StringSession(session_string), api_id, api_hash)
@@ -30,4 +29,3 @@ class UserClient:
         if self.client:
             return self.client.session.save()
         return None
-    
