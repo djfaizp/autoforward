@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from telethon import events, functions
+from telethon import events
 from telethon.errors import ChannelPrivateError, UserNotParticipantError
 from typing import Any
 
@@ -90,6 +90,7 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.debug(f"Received /set_source command from user {user_id}")
         try:
             _, source_channel = event.text.split()
+            source_channel = int(source_channel)  # Ensure the channel ID is stored as an integer
             await db.save_user_credentials(user_id, {'source': source_channel})
             logger.info(f"User {user_id} set source channel: {source_channel}")
             await event.reply("Source channel set successfully")
@@ -106,6 +107,7 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.debug(f"Received /set_destination command from user {user_id}")
         try:
             _, destination_channel = event.text.split()
+            destination_channel = int(destination_channel)  # Ensure the channel ID is stored as an integer
             await db.save_user_credentials(user_id, {'destination': destination_channel})
             logger.info(f"User {user_id} set destination channel: {destination_channel}")
             await event.reply("Destination channel set successfully")
@@ -190,6 +192,7 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.info(f"User {user_id} started forwarding process from message ID {start_id} to {end_id}")
         progress_message = await event.reply(f"Forwarding process started from message ID {start_id} to {end_id}. Use /status to check the progress.")
 
+        # Start the forwarding process in a new asyncio task
         asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message))
 
     @bot.on(events.NewMessage(pattern='/resume_forwarding'))
@@ -200,6 +203,17 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         if not user_data:
             logger.warning(f"User {user_id} attempted to resume forwarding without any credentials")
             await event.reply("Please set up your credentials first. Use /help to see the available commands.")
+            return
+
+        missing_credentials = []
+        for cred in ['api_id', 'api_hash', 'source', 'destination']:
+            if cred not in user_data:
+                missing_credentials.append(cred.replace('_', ' ').title())
+
+        if missing_credentials:
+            missing_cred_str = ", ".join(missing_credentials)
+            logger.warning(f"User {user_id} attempted to resume forwarding with missing credentials: {missing_cred_str}")
+            await event.reply(f"Please set up the following before resuming: {missing_cred_str}. Use /help for instructions.")
             return
 
         if not user_client.client:
@@ -222,4 +236,5 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.info(f"User {user_id} resumed forwarding process from message ID {start_id} to {end_id}")
         progress_message = await event.reply(f"Resumed forwarding process from message ID {start_id} to {end_id}. Use /status to check the progress.")
 
-        asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message))
+        # Resume the forwarding process in a new asyncio task
+        asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message, start_id=start_id, end_id=end_id))

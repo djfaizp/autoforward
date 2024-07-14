@@ -22,6 +22,14 @@ class Forwarder:
     def generate_random_id(self):
         return generate_random_long()
 
+    async def validate_channel(self, channel_id):
+        try:
+            entity = await self.user_client.client.get_entity(channel_id)  # Removed int conversion
+            return entity
+        except ValueError:
+            logger.error(f"Cannot find any entity corresponding to {channel_id}")
+            raise
+
     async def forward_message(self, message, destination_channel):
         try:
             filename = None
@@ -33,7 +41,7 @@ class Forwarder:
                         return None
                 
                 from_peer = await self.user_client.client.get_input_entity(message.peer_id)
-                to_peer = await self.user_client.client.get_input_entity(destination_channel)
+                to_peer = await self.user_client.client.get_input_entity(destination_channel)  # Removed int conversion
                 
                 result = await self.user_client.client(ForwardMessagesRequest(
                     from_peer=from_peer,
@@ -56,13 +64,13 @@ class Forwarder:
                 if filename:
                     await self.db.mark_filename_as_forwarded(message.sender_id, filename)
             else:
-                sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")
+                sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")  # Removed int conversion
             
             return sent_message
         except MessageTooLongError:
             truncated_text = (message.text or "")[:4096]
             logger.warning(f"Message too long, truncating: {truncated_text[:50]}...")
-            return await self.user_client.client.send_message(destination_channel, truncated_text)
+            return await self.user_client.client.send_message(destination_channel, truncated_text)  # Removed int conversion
         except ChatWriteForbiddenError:
             logger.error(f"Write permissions are not available in the destination channel: {destination_channel}")
             raise
@@ -76,9 +84,9 @@ class Forwarder:
 
         if start_id is not None and end_id is not None:
             await db.save_user_credentials(user_id, {
-                'start_id': start_id,
-                'end_id': end_id,
-                'current_id': start_id,
+                'start_id': int(start_id),
+                'end_id': int(end_id),
+                'current_id': int(start_id),
                 'messages_forwarded': 0,
                 'forwarding': True
             })
@@ -93,9 +101,17 @@ class Forwarder:
         skipped_messages = []
         last_progress_content = ""
 
+        try:
+            source_channel = await self.validate_channel(user_data['source'])
+            destination_channel = await self.validate_channel(user_data['destination'])
+        except ValueError:
+            await bot.edit_message(user_id, progress_message.id, "Error: Invalid source or destination channel.")
+            await db.save_user_credentials(user_id, {'forwarding': False})
+            return
+
         while user_data['forwarding'] and current_id <= end_id:
             try:
-                messages = await self.user_client.client.get_messages(user_data['source'], ids=[current_id])
+                messages = await self.user_client.client.get_messages(source_channel, ids=[current_id])
                 if not messages:
                     logger.warning(f"Message ID {current_id} not found in source channel.")
                     current_id += 1
@@ -107,7 +123,7 @@ class Forwarder:
                     for retry in range(self.max_retries):
                         try:
                             await self.rate_limiter.wait()
-                            sent_message = await self.forward_message(message, user_data['destination'])
+                            sent_message = await self.forward_message(message, destination_channel)
                             if sent_message:
                                 await self.db.mark_message_as_forwarded(user_id, message.id)
                                 messages_forwarded += 1
