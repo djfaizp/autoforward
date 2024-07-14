@@ -1,16 +1,21 @@
-import asyncio
+# rate_limiter.py
 import time
+import asyncio
+from collections import deque
 
-class UserRateLimiter:
-    def __init__(self, max_calls: int, period: int):
+class RateLimiter:
+    def __init__(self, max_calls, period):
         self.max_calls = max_calls
         self.period = period
-        self.user_limits = {}
+        self.calls = deque()
 
-    async def wait(self, user_id: int):
-        if user_id not in self.user_limits:
-            self.user_limits[user_id] = []
-        while len(self.user_limits[user_id]) >= self.max_calls:
-            await asyncio.sleep(self.period)
-            self.user_limits[user_id] = [t for t in self.user_limits[user_id] if t > time.time() - self.period]
-        self.user_limits[user_id].append(time.time())
+    async def wait(self):
+        now = time.time()
+        while len(self.calls) >= self.max_calls:
+            sleep_time = self.calls[0] - (now - self.period)
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            now = time.time()
+            while self.calls and self.calls[0] <= now - self.period:
+                self.calls.popleft()
+        self.calls.append(time.time())

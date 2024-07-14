@@ -1,10 +1,12 @@
+# main.py
+
 import asyncio
 import logging
 from bot_client import BotClient
 from user_client import UserClient
 from commands import setup_commands
 from forwarder import Forwarder
-from config import Settings  # Adjusted import to match existing config structure
+from config import load_config
 from database import db
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -19,13 +21,11 @@ async def main():
     bot = None
     user_client = None
     try:
-        config = Settings()  # Directly instantiate Settings
+        config = load_config()
         logger.info("Configuration loaded successfully")
         
         await db.connect()
-        logger.info("Connected to database")
-
-        await db.setup_message_queue()  # Ensure the database setup is called
+        logger.info("Connected to MongoDB")
 
         bot = BotClient(config)
         await bot.start()
