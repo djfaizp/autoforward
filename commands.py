@@ -3,6 +3,10 @@ import asyncio
 import json
 import logging
 from telethon import events
+<<<<<<< HEAD
+=======
+from telethon.errors import ChannelPrivateError, UserNotParticipantError
+>>>>>>> 495dcb0 (skip duplicate)
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -95,10 +99,15 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.debug(f"Received /set_source command from user {user_id}")
         try:
             _, source_channel = event.text.split()
+<<<<<<< HEAD
             source_channel = int(source_channel)
             user_data = await db.get_user_credentials(user_id)
             user_data['source'] = source_channel
             await db.save_user_credentials(user_id, user_data)
+=======
+            source_channel = int(source_channel)  # Ensure the channel ID is stored as an integer
+            await db.save_user_credentials(user_id, {'source': source_channel})
+>>>>>>> 495dcb0 (skip duplicate)
             logger.info(f"User {user_id} set source channel: {source_channel}")
             await event.reply("Source channel set successfully")
         except ValueError:
@@ -114,10 +123,15 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         logger.debug(f"Received /set_destination command from user {user_id}")
         try:
             _, destination_channel = event.text.split()
+<<<<<<< HEAD
             destination_channel = int(destination_channel)
             user_data = await db.get_user_credentials(user_id)
             user_data['destination'] = destination_channel
             await db.save_user_credentials(user_id, user_data)
+=======
+            destination_channel = int(destination_channel)  # Ensure the channel ID is stored as an integer
+            await db.save_user_credentials(user_id, {'destination': destination_channel})
+>>>>>>> 495dcb0 (skip duplicate)
             logger.info(f"User {user_id} set destination channel: {destination_channel}")
             await event.reply("Destination channel set successfully")
         except ValueError:

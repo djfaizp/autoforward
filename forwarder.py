@@ -39,6 +39,14 @@ class Forwarder:
             logger.error(f"Cannot find any entity corresponding to {channel_id}")
             raise
 
+    async def validate_channel(self, channel_id):
+        try:
+            entity = await self.user_client.client.get_entity(channel_id)  # Removed int conversion
+            return entity
+        except ValueError:
+            logger.error(f"Cannot find any entity corresponding to {channel_id}")
+            raise
+
     async def forward_message(self, message, destination_channel):
         async def _forward():
             filename = None
@@ -51,8 +59,13 @@ class Forwarder:
                         return None
 
                 from_peer = await self.user_client.client.get_input_entity(message.peer_id)
+<<<<<<< HEAD
                 to_peer = await self.user_client.client.get_input_entity(destination_channel)
 
+=======
+                to_peer = await self.user_client.client.get_input_entity(destination_channel)  # Removed int conversion
+                
+>>>>>>> 495dcb0 (skip duplicate)
                 result = await self.user_client.client(ForwardMessagesRequest(
                     from_peer=from_peer,
                     id=[message.id],
@@ -75,11 +88,27 @@ class Forwarder:
                     await self.db.mark_filename_as_forwarded(message.sender_id, filename)
                     await self.media_handler.store_file_metadata(file_metadata)
             else:
+<<<<<<< HEAD
                 sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")
 
             return sent_message
 
         return await retry_with_backoff(_forward)
+=======
+                sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")  # Removed int conversion
+            
+            return sent_message
+        except MessageTooLongError:
+            truncated_text = (message.text or "")[:4096]
+            logger.warning(f"Message too long, truncating: {truncated_text[:50]}...")
+            return await self.user_client.client.send_message(destination_channel, truncated_text)  # Removed int conversion
+        except ChatWriteForbiddenError:
+            logger.error(f"Write permissions are not available in the destination channel: {destination_channel}")
+            raise
+        except Exception as e:
+            logger.error(f"Error in forward_message: {str(e)}", exc_info=True)
+            raise
+>>>>>>> 495dcb0 (skip duplicate)
 
     async def forward_messages(self, user_id, bot, db, progress_message, start_id=None, end_id=None):
         logger.info(f"Starting forwarding process for user {user_id}")
@@ -113,15 +142,28 @@ class Forwarder:
             await db.save_user_credentials(user_id, {'forwarding': False})
             return
 
+        try:
+            source_channel = await self.validate_channel(user_data['source'])
+            destination_channel = await self.validate_channel(user_data['destination'])
+        except ValueError:
+            await bot.edit_message(user_id, progress_message.id, "Error: Invalid source or destination channel.")
+            await db.save_user_credentials(user_id, {'forwarding': False})
+            return
+
         while user_data['forwarding'] and current_id <= end_id:
             try:
+<<<<<<< HEAD
                 message_ids = list(range(current_id, min(current_id + self.max_forward_batch, end_id + 1)))
                 messages = await self.user_client.client.get_messages(source_channel, ids=message_ids)
+=======
+                messages = await self.user_client.client.get_messages(source_channel, ids=[current_id])
+>>>>>>> 495dcb0 (skip duplicate)
                 if not messages:
                     logger.warning(f"No messages found in range {current_id}-{current_id + self.max_forward_batch}.")
                     current_id += self.max_forward_batch
                     continue
 
+<<<<<<< HEAD
                 # Filter out duplicate filenames before processing
                 unique_messages = []
                 for message in messages:
@@ -132,6 +174,38 @@ class Forwarder:
                             skipped_messages.append((message.id, "Duplicate filename detected"))
                             continue
                     unique_messages.append(message)
+=======
+                if not isinstance(message, MessageService) and not await self.db.is_message_forwarded(user_id, message.id):
+                    for retry in range(self.max_retries):
+                        try:
+                            await self.rate_limiter.wait()
+                            sent_message = await self.forward_message(message, destination_channel)
+                            if sent_message:
+                                await self.db.mark_message_as_forwarded(user_id, message.id)
+                                messages_forwarded += 1
+                                logger.debug(f"Forwarded message {message.id} as new message {sent_message.id}")
+                            else:
+                                skipped_messages.append((message.id, "Duplicate filename detected"))
+                            break
+                        except FloodWaitError as fwe:
+                            logger.warning(f"FloodWaitError: Waiting for {fwe.seconds} seconds")
+                            await asyncio.sleep(fwe.seconds)
+                        except MessageIdInvalidError:
+                            logger.warning(f"Invalid message ID: {message.id}. Skipping.")
+                            skipped_messages.append((message.id, "Invalid message ID"))
+                            break
+                        except ChatWriteForbiddenError:
+                            logger.error(f"Write permissions are not available in the destination channel: {user_data['destination']}")
+                            skipped_messages.append((message.id, "Write permissions are not available in the destination channel"))
+                            break
+                        except Exception as e:
+                            logger.error(f"Error forwarding message {message.id}: {str(e)}", exc_info=True)
+                            if retry == self.max_retries - 1:
+                                logger.error(f"Max retries reached for message {message.id}. Skipping.")
+                                skipped_messages.append((message.id, str(e)))
+                    
+                    await asyncio.sleep(random.randint(0, 1))
+>>>>>>> 495dcb0 (skip duplicate)
 
                 for message in unique_messages:
                     if not isinstance(message, MessageService) and not await self.db.is_message_forwarded(user_id, message.id):
