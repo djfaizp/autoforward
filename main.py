@@ -1,4 +1,5 @@
 # main.py
+
 import asyncio
 import logging
 from bot_client import BotClient
@@ -32,7 +33,7 @@ async def main():
 
         user_client = UserClient()
 
-        forwarder = Forwarder(user_client, db)
+        forwarder = Forwarder(user_client, db, config)  # Pass config to Forwarder
 
         setup_commands(bot, user_client, forwarder, db)
         logger.info("Commands set up successfully")
@@ -56,4 +57,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
-

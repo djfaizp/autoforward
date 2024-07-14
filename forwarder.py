@@ -13,18 +13,23 @@ from rate_limiter import RateLimiter
 logger = logging.getLogger(__name__)
 
 class Forwarder:
-    def __init__(self, user_client, db, max_calls=20, period=60, max_retries=3):
+    def __init__(self, user_client, db, config, max_retries=3):
         self.user_client = user_client
         self.db = db
-        self.rate_limiter = RateLimiter(max_calls, period)
+        self.rate_limiter = RateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
+        self.max_forward_batch = config.MAX_FORWARD_BATCH
+        self.forward_delay_min = config.FORWARD_DELAY_MIN
+        self.forward_delay_max = config.FORWARD_DELAY_MAX
 
     def generate_random_id(self):
         return generate_random_long()
 
     async def validate_channel(self, channel_id):
         try:
-            entity = await self.user_client.client.get_entity(channel_id)  # Removed int conversion
+            if isinstance(channel_id, str) and channel_id.startswith('-100'):
+                channel_id = int(channel_id)
+            entity = await self.user_client.client.get_entity(channel_id)
             return entity
         except ValueError:
             logger.error(f"Cannot find any entity corresponding to {channel_id}")
@@ -41,7 +46,7 @@ class Forwarder:
                         return None
                 
                 from_peer = await self.user_client.client.get_input_entity(message.peer_id)
-                to_peer = await self.user_client.client.get_input_entity(destination_channel)  # Removed int conversion
+                to_peer = await self.user_client.client.get_input_entity(destination_channel)
                 
                 result = await self.user_client.client(ForwardMessagesRequest(
                     from_peer=from_peer,
@@ -64,13 +69,13 @@ class Forwarder:
                 if filename:
                     await self.db.mark_filename_as_forwarded(message.sender_id, filename)
             else:
-                sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")  # Removed int conversion
+                sent_message = await self.user_client.client.send_message(destination_channel, message.text or "")
             
             return sent_message
         except MessageTooLongError:
             truncated_text = (message.text or "")[:4096]
             logger.warning(f"Message too long, truncating: {truncated_text[:50]}...")
-            return await self.user_client.client.send_message(destination_channel, truncated_text)  # Removed int conversion
+            return await self.user_client.client.send_message(destination_channel, truncated_text)
         except ChatWriteForbiddenError:
             logger.error(f"Write permissions are not available in the destination channel: {destination_channel}")
             raise
@@ -100,6 +105,7 @@ class Forwarder:
         messages_forwarded = user_data['messages_forwarded']
         skipped_messages = []
         last_progress_content = ""
+        messages_processed = 0  # Counter for processed messages
 
         try:
             source_channel = await self.validate_channel(user_data['source'])
@@ -127,6 +133,7 @@ class Forwarder:
                             if sent_message:
                                 await self.db.mark_message_as_forwarded(user_id, message.id)
                                 messages_forwarded += 1
+                                messages_processed += 1  # Increment processed messages counter
                                 logger.debug(f"Forwarded message {message.id} as new message {sent_message.id}")
                             else:
                                 skipped_messages.append((message.id, "Duplicate filename detected"))
@@ -151,6 +158,13 @@ class Forwarder:
                     await asyncio.sleep(random.randint(0, 1))
 
                 current_id += 1
+
+                # Implementing delay after every MAX_FORWARD_BATCH messages
+                if messages_processed >= self.max_forward_batch:
+                    delay = random.randint(self.forward_delay_min, self.forward_delay_max)
+                    logger.info(f"Processed {self.max_forward_batch} messages, waiting for {delay} seconds...")
+                    await asyncio.sleep(delay)  # Delay for a random time between FORWARD_DELAY_MIN and FORWARD_DELAY_MAX
+                    messages_processed = 0  # Reset counter
 
                 # Update progress in the database
                 await db.update_forwarding_progress(user_id, messages_forwarded, current_id)
