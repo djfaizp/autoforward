@@ -1,5 +1,3 @@
-# main.py
-
 import asyncio
 import logging
 from bot_client import BotClient
@@ -12,7 +10,6 @@ from database import db
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Set logging level for specific telethon modules to WARNING to suppress DEBUG messages
 logging.getLogger('telethon').setLevel(logging.WARNING)
 logging.getLogger('telethon.network.mtprotosender').setLevel(logging.WARNING)
 logging.getLogger('telethon.network.connection.connection').setLevel(logging.WARNING)
@@ -32,13 +29,20 @@ async def main():
         logger.info("Bot client started successfully")
 
         user_client = UserClient()
-
-        forwarder = Forwarder(user_client, db, config)  # Pass config to Forwarder
+        forwarder = Forwarder(user_client, db, config)
 
         setup_commands(bot, user_client, forwarder, db)
         logger.info("Commands set up successfully")
 
-        logger.info("Bot is now running")
+        active_users = await db.get_active_users()
+        logger.info(f"Active users: {active_users}")
+
+        tasks = [forwarder.process_user_queue(user_id, bot, db, None) for user_id in active_users]
+        logger.info(f"Created {len(tasks)} tasks for active users")
+        
+        await asyncio.gather(*tasks)
+        logger.info("All tasks have been processed")
+
         await bot.run_until_disconnected()
     except asyncio.CancelledError:
         logger.info("Main task was cancelled.")

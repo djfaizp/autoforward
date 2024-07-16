@@ -1,5 +1,4 @@
 # commands.py
-
 import asyncio
 import logging
 from telethon import events
@@ -136,12 +135,15 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         user_id = event.sender_id
         try:
             await db.save_user_credentials(user_id, {'forwarding': False})
-            logger.info(f"User {user_id} stopped forwarding process")
-            await event.reply("Forwarding process stopped.")
+            logger.info(f"User {user_id} requested to stop forwarding process")
+            await event.reply("Stopping the forwarding process. Please wait...")
+            
+            await forwarder.interrupt_forwarding(user_id)
+            
+            await event.reply("Forwarding process has been stopped.")
         except Exception as e:
             logger.error(f"Unexpected error in stop_forwarding_command: {str(e)}", exc_info=True)
             await event.reply("An unexpected error occurred. Please try again later.")
-
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
     async def start_forwarding_command(event):
         user_id = event.sender_id
@@ -239,3 +241,4 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         # Resume the forwarding process in a new asyncio task
         asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message, start_id=start_id, end_id=end_id))
 
+    logger.info("Commands set up successfully")

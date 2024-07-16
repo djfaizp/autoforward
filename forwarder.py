@@ -1,14 +1,11 @@
-# forwarder.py
-
-import logging
-import random
 import asyncio
+import logging
 from telethon import types
 from telethon.helpers import generate_random_long
 from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLongError, ChatWriteForbiddenError
 from telethon.tl.types import MessageMediaWebPage, MessageService
 from telethon.tl.functions.messages import ForwardMessagesRequest
-from rate_limiter import RateLimiter
+from rate_limiter import UserRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -16,17 +13,22 @@ class Forwarder:
     def __init__(self, user_client, db, config, max_retries=3):
         self.user_client = user_client
         self.db = db
-        self.rate_limiter = RateLimiter(config.MAX_FORWARD_BATCH, 60)
+        self.rate_limiter = UserRateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
         self.max_forward_batch = config.MAX_FORWARD_BATCH
         self.forward_delay_min = config.FORWARD_DELAY_MIN
         self.forward_delay_max = config.FORWARD_DELAY_MAX
+        self.forwarding_tasks = {}  # Dictionary to keep track of forwarding tasks
 
     def generate_random_id(self):
         return generate_random_long()
 
     async def validate_channel(self, channel_id):
         try:
+            if not self.user_client.client or not self.user_client.client.is_connected():
+                logger.error("User client is not connected")
+                raise ValueError("User client is not connected")
+            
             if isinstance(channel_id, str) and channel_id.startswith('-100'):
                 channel_id = int(channel_id)
             entity = await self.user_client.client.get_entity(channel_id)
@@ -34,6 +36,11 @@ class Forwarder:
         except ValueError:
             logger.error(f"Cannot find any entity corresponding to {channel_id}")
             raise
+
+    async def ensure_user_client_started(self, user_data):
+        if not self.user_client.client or not self.user_client.client.is_connected():
+            await self.user_client.start(user_data['api_id'], user_data['api_hash'], user_data.get('session_string'))
+            logger.info("User client started successfully in ensure_user_client_started")
 
     async def forward_message(self, message, destination_channel):
         try:
@@ -87,6 +94,8 @@ class Forwarder:
         logger.info(f"Starting forwarding process for user {user_id}")
         user_data = await db.get_user_credentials(user_id)
 
+        await self.ensure_user_client_started(user_data)
+
         if start_id is not None and end_id is not None:
             await db.save_user_credentials(user_id, {
                 'start_id': int(start_id),
@@ -115,60 +124,64 @@ class Forwarder:
             await db.save_user_credentials(user_id, {'forwarding': False})
             return
 
-        while user_data['forwarding'] and current_id <= end_id:
-            try:
-                messages = await self.user_client.client.get_messages(source_channel, ids=[current_id])
-                if not messages:
-                    logger.warning(f"Message ID {current_id} not found in source channel.")
-                    current_id += 1
-                    continue
-                
-                message = messages[0]
+        try:
+            while user_data['forwarding'] and current_id <= end_id:
+                # Check if forwarding should be stopped
+                user_data = await db.get_user_credentials(user_id)
+                if not user_data['forwarding']:
+                    logger.info(f"Stopping forwarding for user {user_id} as requested.")
+                    break
 
-                if message and not isinstance(message, MessageService) and not await self.db.is_message_forwarded(user_id, message.id):
-                    for retry in range(self.max_retries):
-                        try:
-                            await self.rate_limiter.wait()
-                            sent_message = await self.forward_message(message, destination_channel)
-                            if sent_message:
-                                await self.db.mark_message_as_forwarded(user_id, message.id)
-                                messages_forwarded += 1
-                                messages_processed += 1  # Increment processed messages counter
-                                logger.debug(f"Forwarded message {message.id} as new message {sent_message.id}")
-                            else:
-                                skipped_messages.append((message.id, "Duplicate filename detected"))
-                            break
-                        except FloodWaitError as fwe:
-                            logger.warning(f"FloodWaitError: Waiting for {fwe.seconds} seconds")
-                            await asyncio.sleep(fwe.seconds)
-                        except MessageIdInvalidError:
-                            logger.warning(f"Invalid message ID: {message.id}. Skipping.")
-                            skipped_messages.append((message.id, "Invalid message ID"))
-                            break
-                        except ChatWriteForbiddenError:
-                            logger.error(f"Write permissions are not available in the destination channel: {user_data['destination']}")
-                            skipped_messages.append((message.id, "Write permissions are not available in the destination channel"))
-                            break
-                        except Exception as e:
-                            logger.error(f"Error forwarding message {message.id}: {str(e)}", exc_info=True)
-                            if retry == self.max_retries - 1:
-                                logger.error(f"Max retries reached for message {message.id}. Skipping.")
-                                skipped_messages.append((message.id, str(e)))
+                logger.debug(f"Fetching messages from {current_id} to {min(current_id + self.max_forward_batch, end_id + 1)}")
+                batch_message_ids = list(range(current_id, min(current_id + self.max_forward_batch, end_id + 1)))
+                batch_messages = await self.user_client.client.get_messages(source_channel, ids=batch_message_ids)
+                if not batch_messages:
+                    logger.warning(f"No messages found in the range {current_id} to {min(current_id + self.max_forward_batch, end_id + 1)}")
+                    break
+
+                for message in batch_messages:
+                    if message is None:
+                        logger.warning(f"Received None message in batch for message ID {current_id}")
+                        current_id += 1
+                        continue
                     
-                    await asyncio.sleep(random.randint(0, 1))
+                    logger.debug(f"Processing message ID {message.id}")
+                    if message and not isinstance(message, MessageService) and not await self.db.is_message_forwarded(user_id, message.id):
+                        logger.debug(f"Message ID {message.id} is not forwarded yet and is not a service message")
+                        for retry in range(self.max_retries):
+                            try:
+                                await self.rate_limiter.wait(user_id)
+                                sent_message = await self.forward_message(message, destination_channel)
+                                if sent_message:
+                                    await self.db.mark_message_as_forwarded(user_id, message.id)
+                                    messages_forwarded += 1
+                                    messages_processed += 1
+                                    logger.info(f"Message ID {message.id} forwarded successfully as new message ID {sent_message.id}")
+                                break
+                            except FloodWaitError as fwe:
+                                logger.warning(f"FloodWaitError: Waiting for {fwe.seconds} seconds")
+                                await asyncio.sleep(fwe.seconds)
+                            except MessageIdInvalidError:
+                                logger.warning(f"Invalid message ID: {message.id}. Skipping.")
+                                break
+                            except ChatWriteForbiddenError:
+                                logger.error(f"Write permissions are not available in the destination channel: {user_data['destination']}")
+                                return
+                            except Exception as e:
+                                logger.error(f"Error forwarding message {message.id}: {str(e)}", exc_info=True)
+                                if retry == self.max_retries - 1:
+                                    break
+                        await asyncio.sleep(random.randint(0, 1))
 
-                current_id += 1
+                current_id += self.max_forward_batch
 
-                # Implementing delay after every MAX_FORWARD_BATCH messages
                 if messages_processed >= self.max_forward_batch:
                     delay = random.randint(self.forward_delay_min, self.forward_delay_max)
                     logger.info(f"Processed {self.max_forward_batch} messages, waiting for {delay} seconds...")
-                    await asyncio.sleep(delay)  # Delay for a random time between FORWARD_DELAY_MIN and FORWARD_DELAY_MAX
-                    messages_processed = 0  # Reset counter
+                    await asyncio.sleep(delay)
+                    messages_processed = 0
 
-                # Update progress in the database
                 await db.update_forwarding_progress(user_id, messages_forwarded, current_id)
-
                 progress_percentage = (messages_forwarded / total_messages) * 100
                 progress_content = f"Forwarding progress: {progress_percentage:.2f}% ({messages_forwarded}/{total_messages})"
 
@@ -176,22 +189,47 @@ class Forwarder:
                     await bot.edit_message(user_id, progress_message.id, progress_content)
                     last_progress_content = progress_content
 
-                # Fetch the latest user data to check if forwarding has been stopped
                 user_data = await db.get_user_credentials(user_id)
                 if not user_data['forwarding']:
-                    logger.info(f"User {user_id} stopped forwarding process")
+                    logger.info(f"User {user_id} requested to stop forwarding.")
                     break
 
-            except Exception as e:
-                logger.error(f"Error during forwarding for user {user_id}: {str(e)}", exc_info=True)
-                await bot.edit_message(user_id, progress_message.id, f"An error occurred during forwarding: {str(e)}")
-                break
+                # Check for task cancellation
+                if asyncio.current_task().cancelled():
+                    logger.info(f"Forwarding task for user {user_id} was cancelled.")
+                    break
 
-        await db.update_forwarding_progress(user_id, messages_forwarded, current_id)
-        await db.save_user_credentials(user_id, {'forwarding': False})
-        logger.info(f"Forwarding process completed for user {user_id}")
-        completion_message = f"Forwarding process completed. Total messages forwarded: {messages_forwarded}"
-        if skipped_messages:
-            skipped_info = "\n".join([f"Message ID {msg_id}: {reason}" for msg_id, reason in skipped_messages])
-            completion_message += f"\nSkipped messages:\n{skipped_info}"
-        await bot.edit_message(user_id, progress_message.id, completion_message)
+            logger.info(f"Forwarding process completed for user {user_id}")
+        except asyncio.CancelledError:
+            logger.info(f"Forwarding task for user {user_id} was cancelled.")
+        finally:
+            await db.save_user_credentials(user_id, {'forwarding': False})
+            if user_id in self.forwarding_tasks:
+                del self.forwarding_tasks[user_id]
+
+    async def interrupt_forwarding(self, user_id):
+        if user_id in self.forwarding_tasks:
+            task = self.forwarding_tasks[user_id]
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"Cancellation of forwarding task for user {user_id} timed out")
+            except asyncio.CancelledError:
+                pass
+            logger.info(f"Forwarding task for user {user_id} has been cancelled.")
+        else:
+            logger.warning(f"No active forwarding task found for user {user_id}")
+
+    async def process_user_queue(self, user_id, bot, db, progress_message):
+        logger.info(f"Processing queue for user {user_id}")
+        task = asyncio.create_task(self.forward_messages(user_id, bot, db, progress_message))
+        self.forwarding_tasks[user_id] = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            logger.info(f"Forwarding task for user {user_id} was cancelled.")
+        finally:
+            if user_id in self.forwarding_tasks:
+                del self.forwarding_tasks[user_id]
+        logger.info(f"Completed processing queue for user {user_id}")

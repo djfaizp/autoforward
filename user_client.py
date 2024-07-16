@@ -11,10 +11,8 @@ class UserClient:
 
     async def start(self, api_id, api_hash, session_string=None):
         try:
-            if session_string:
-                self.client = TelegramClient(StringSession(session_string), api_id, api_hash)
-            else:
-                self.client = TelegramClient(StringSession(), api_id, api_hash)
+            session = StringSession(session_string) if session_string else StringSession()
+            self.client = TelegramClient(session, api_id, api_hash)
             await self.client.start()
             logger.info("User client started successfully")
         except Exception as e:
@@ -27,5 +25,4 @@ class UserClient:
             logger.info("User client stopped")
 
     def get_session_string(self):
-        if self.client:
-            return self.client.session.save()
+        return self.client.session.save() if self.client else None

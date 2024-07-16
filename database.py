@@ -1,5 +1,4 @@
 # database.py
-
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
@@ -152,6 +151,15 @@ class Database:
             return updated_user
         except Exception as e:
             logger.error(f"Failed to update forwarding progress: {str(e)}", exc_info=True)
+            raise
+
+    async def get_active_users(self):
+        try:
+            users_collection = self.db.users
+            active_users = await users_collection.find({'forwarding': True}).to_list(length=None)
+            return [user['user_id'] for user in active_users]
+        except Exception as e:
+            logger.error(f"Failed to get active users: {str(e)}", exc_info=True)
             raise
 
 db = Database()
