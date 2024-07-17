@@ -1,7 +1,10 @@
 # auth.py
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.errors import PhoneCodeInvalidError, PhoneCodeExpiredError, SessionPasswordNeededError, PasswordHashInvalidError
+from telethon.errors import (
+    PhoneCodeInvalidError, PhoneCodeExpiredError, 
+    SessionPasswordNeededError, PasswordHashInvalidError
+)
 from telethon.tl.custom import Button
 from telethon import events
 from database import db
