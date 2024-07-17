@@ -2,5 +2,4 @@ telethon
 python-dotenv
 pydantic-settings
 pymongo
-aiosqlite
 motor

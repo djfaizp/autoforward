@@ -1,7 +1,18 @@
 # utils.py
 import logging
-from telethon import TelegramClient, events
-from auth import start_auth, save_api_id, save_api_hash, save_phone_number, verify_otp, save_source_channel, save_destination_channel, AuthState
+from telethon import events
+from auth import (
+    start_auth,
+    save_api_id,
+    save_api_hash,
+    save_phone_number,
+    verify_otp,
+    save_source_channel,
+    save_destination_channel,
+    AuthState,
+    send_otp,  # Ensure send_otp is imported
+    handle_retry_otp  # Ensure handle_retry_otp is imported
+)
 from database import db
 from forwarder import Forwarder
 
@@ -17,12 +28,12 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         else:
             await event.reply("Welcome back! You are already authenticated. Use /help to see available commands.")
 
-    # Registering handlers for authentication steps
-    @bot.on(events.NewMessage())
+    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status)'))
     async def handle_auth(event):
         user_id = event.sender_id
         user_data = await db.get_user_credentials(user_id)
         auth_state = user_data.get('auth_state')
+        
         if auth_state == AuthState.REQUEST_API_ID:
             await save_api_id(event, user_id)
         elif auth_state == AuthState.REQUEST_API_HASH:
@@ -30,7 +41,8 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
             await save_phone_number(event, user_id)
         elif auth_state == AuthState.VERIFY_OTP:
-            await verify_otp(event, user_id)
+            client = await send_otp(event, user_id)  # Get the client instance
+            await verify_otp(event, user_id, client)
         elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
             await save_source_channel(event, user_id)
         elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
@@ -48,13 +60,20 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     async def status_command(event):
         await forwarder.status(event, db)
 
-    logger.info("Commands set up successfully")
+    @bot.on(events.NewMessage(pattern='/help'))
+    async def help_command(event):
+        help_text = """
+        Available commands:
+        /start - Start the bot and begin authentication
+        /help - Show this help message
+        /start_forwarding <start_id>-<end_id> - Start the forwarding process
+        /stop_forwarding - Stop the forwarding process
+        /status - Check the status of the forwarding process
+        """
+        await event.reply(help_text)
 
-async def generate_session_string(api_id, api_hash, phone_number, code):
-    from telethon.sessions import StringSession
-    client = TelegramClient(StringSession(), api_id, api_hash)
-    await client.connect()
-    await client.sign_in(phone_number, code)
-    session_string = client.session.save()
-    await client.disconnect()
-    return session_string
+    @bot.on(events.CallbackQuery(data=b'retry_otp'))
+    async def handle_retry_otp_command(event):
+        await handle_retry_otp(event)
+
+    logger.info("Commands set up successfully")

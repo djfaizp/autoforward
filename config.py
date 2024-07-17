@@ -1,8 +1,9 @@
 # config.py
-from pydantic import BaseModel, ValidationError, ValidationInfo, field_validator
+from pydantic import BaseModel, ValidationError, field_validator
 import os
 from dotenv import load_dotenv
-import logging
+
+load_dotenv()
 
 class Config(BaseModel):
     BOT_TOKEN: str
@@ -21,8 +22,6 @@ class Config(BaseModel):
         return v
 
 def load_config():
-    load_dotenv()
-
     try:
         config = Config(
             BOT_TOKEN=os.getenv('BOT_TOKEN'),
@@ -34,7 +33,7 @@ def load_config():
             MONGODB_URI=os.getenv('MONGODB_URI'),
             DB_NAME=os.getenv('DB_NAME')
         )
-    except ValueError as e:
+    except ValidationError as e:
         raise ValueError(f"Configuration error: {e}")
 
     return config
