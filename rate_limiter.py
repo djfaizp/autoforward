@@ -1,7 +1,7 @@
 # rate_limiter.py
-import time
 import asyncio
-from collections import deque, defaultdict
+import time
+from collections import defaultdict, deque
 
 class UserRateLimiter:
     def __init__(self, max_calls, period):

@@ -1,19 +1,27 @@
-
 # commands.py
-import asyncio
 import logging
 from telethon import events
-from telethon.errors import ChannelPrivateError, UserNotParticipantError
-from typing import Any
+from auth import initiate_user_interaction, handle_user_response, auth_state
+from database import db  # Ensure the database module is imported
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
+def setup_commands(bot, db):
     @bot.on(events.NewMessage(pattern='/start'))
     async def start_command(event):
         user_id = event.sender_id
-        logger.info(f"User {user_id} started the bot")
-        await event.reply("Welcome to the Autoforward bot! Use /help to see available commands.")
+        user_data = await db.get_user_credentials(user_id)
+        if user_data and 'session_string' in user_data:
+            await event.reply("Welcome back! Use /help to see available commands.")
+        else:
+            await initiate_user_interaction(event, user_id)
+
+    @bot.on(events.NewMessage)
+    async def handle_event(event):
+        user_id = event.sender_id
+        if user_id in auth_state:
+            await handle_user_response(event, user_id)
 
     @bot.on(events.NewMessage(pattern='/help'))
     async def help_command(event):
@@ -23,11 +31,6 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         Available commands:
         /start - Start the bot
         /help - Show this help message
-        /set_api_id <api_id> - Set the API ID for user client
-        /set_api_hash <api_hash> - Set the API Hash for user client
-        /set_session_string <session_string> - Set the session string for user client (optional)
-        /set_source <channel_id> - Set the source channel
-        /set_destination <channel_id> - Set the destination channel
         /start_forwarding <start_id>-<end_id> - Start the forwarding process with message ID range
         /resume_forwarding - Resume the forwarding process from the last saved state
         /status - Check the status of the forwarding process
@@ -35,116 +38,6 @@ def setup_commands(bot: Any, user_client: Any, forwarder: Any, db: Any):
         """
         await event.reply(help_text)
 
-    @bot.on(events.NewMessage(pattern='/set_api_id'))
-    async def set_api_id_command(event):
-        user_id = event.sender_id
-        try:
-            _, api_id = event.text.split()
-            api_id = int(api_id)
-            await db.save_user_credentials(user_id, {'api_id': api_id})
-            logger.info(f"User {user_id} set API ID")
-            await event.reply("API ID set successfully")
-        except ValueError:
-            logger.warning(f"User {user_id} provided invalid format for set_api_id")
-            await event.reply("Invalid API ID. Please provide a valid integer.")
-        except Exception as e:
-            logger.error(f"Unexpected error in set_api_id_command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")
-
-    @bot.on(events.NewMessage(pattern='/set_api_hash'))
-    async def set_api_hash_command(event):
-        user_id = event.sender_id
-        try:
-            _, api_hash = event.text.split()
-            if len(api_hash) != 32:
-                raise ValueError("API Hash should be 32 characters long")
-            await db.save_user_credentials(user_id, {'api_hash': api_hash})
-            logger.info(f"User {user_id} set API Hash")
-            await event.reply("API Hash set successfully")
-        except ValueError as e:
-            logger.warning(f"User {user_id} provided invalid format for set_api_hash: {str(e)}")
-            await event.reply(f"Invalid API Hash. {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error in set_api_hash_command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")
-            
-    @bot.on(events.NewMessage(pattern='/set_session_string'))
-    async def set_session_string_command(event):
-        user_id = event.sender_id
-        logger.debug(f"Received /set_session_string command from user {user_id}")
-        try:
-            _, session_string = event.text.split(maxsplit=1)
-            await db.save_user_credentials(user_id, {'session_string': session_string})
-            logger.info(f"User {user_id} set session string: {session_string}")
-            await event.reply("Session string set successfully")
-        except ValueError:
-            logger.warning(f"User {user_id} provided invalid format for /set_session_string")
-            await event.reply("Invalid session string format. Please use: /set_session_string <session_string>")
-        except Exception as e:
-            logger.error(f"Unexpected error in /set_session_string command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")
-
-    @bot.on(events.NewMessage(pattern='/set_source'))
-    async def set_source_command(event):
-        user_id = event.sender_id
-        logger.debug(f"Received /set_source command from user {user_id}")
-        try:
-            _, source_channel = event.text.split()
-            source_channel = int(source_channel)  # Ensure the channel ID is stored as an integer
-            await db.save_user_credentials(user_id, {'source': source_channel})
-            logger.info(f"User {user_id} set source channel: {source_channel}")
-            await event.reply("Source channel set successfully")
-        except ValueError:
-            logger.warning(f"User {user_id} provided invalid format for /set_source")
-            await event.reply("Invalid source channel format. Please use: /set_source <channel_id>")
-        except Exception as e:
-            logger.error(f"Unexpected error in /set_source command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")
-
-    @bot.on(events.NewMessage(pattern='/set_destination'))
-    async def set_destination_command(event):
-        user_id = event.sender_id
-        logger.debug(f"Received /set_destination command from user {user_id}")
-        try:
-            _, destination_channel = event.text.split()
-            destination_channel = int(destination_channel)  # Ensure the channel ID is stored as an integer
-            await db.save_user_credentials(user_id, {'destination': destination_channel})
-            logger.info(f"User {user_id} set destination channel: {destination_channel}")
-            await event.reply("Destination channel set successfully")
-        except ValueError:
-            logger.warning(f"User {user_id} provided invalid format for /set_destination")
-            await event.reply("Invalid destination channel format. Please use: /set_destination <channel_id>")
-        except Exception as e:
-            logger.error(f"Unexpected error in /set_destination command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")        
-
-    @bot.on(events.NewMessage(pattern='/status'))
-    async def status_command(event):
-        user_id = event.sender_id
-        user_data = await db.get_user_credentials(user_id)
-        if user_data and user_data.get('forwarding'):
-            messages_forwarded = user_data.get('messages_forwarded', 0)
-            start_id = user_data.get('start_id')
-            end_id = user_data.get('end_id')
-            progress_percentage = (messages_forwarded / (end_id - start_id + 1)) * 100
-            await event.reply(f"Forwarding progress: {progress_percentage:.2f}% ({messages_forwarded}/{end_id - start_id + 1})")
-        else:
-            await event.reply("No forwarding process in progress.")
-
-    @bot.on(events.NewMessage(pattern='/stop_forwarding'))
-    async def stop_forwarding_command(event):
-        user_id = event.sender_id
-        try:
-            await db.save_user_credentials(user_id, {'forwarding': False})
-            logger.info(f"User {user_id} requested to stop forwarding process")
-            await event.reply("Stopping the forwarding process. Please wait...")
-            
-            await forwarder.interrupt_forwarding(user_id)
-            
-            await event.reply("Forwarding process has been stopped.")
-        except Exception as e:
-            logger.error(f"Unexpected error in stop_forwarding_command: {str(e)}", exc_info=True)
-            await event.reply("An unexpected error occurred. Please try again later.")
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
     async def start_forwarding_command(event):
         user_id = event.sender_id

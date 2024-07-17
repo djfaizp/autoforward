@@ -1,4 +1,4 @@
-
+# forwarder.py
 import asyncio
 import logging
 import random
@@ -235,3 +235,81 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
+
+    async def start_forwarding(self, event, bot, db):
+        user_id = event.sender_id
+        try:
+            _, range_ids = event.text.split()
+            start_id, end_id = map(int, range_ids.split('-'))
+            if start_id >= end_id:
+                raise ValueError("Start ID must be less than End ID")
+        except ValueError as e:
+            logger.warning(f"User {user_id} provided invalid format for start_forwarding: {str(e)}")
+            await event.reply(f"Invalid command format. Use: /start_forwarding <start_id>-<end_id>. {str(e)}")
+            return
+
+        user_data = await db.get_user_credentials(user_id)
+        if not user_data:
+            logger.warning(f"User {user_id} attempted to start forwarding without any credentials")
+            await event.reply("Please set up your credentials first. Use /help to see the available commands.")
+            return
+
+        missing_credentials = []
+        for cred in ['api_id', 'api_hash', 'source', 'destination']:
+            if cred not in user_data:
+                missing_credentials.append(cred.replace('_', ' ').title())
+
+        if missing_credentials:
+            missing_cred_str = ", ".join(missing_credentials)
+            logger.warning(f"User {user_id} attempted to start forwarding with missing credentials: {missing_cred_str}")
+            await event.reply(f"Please set up the following before starting: {missing_cred_str}. Use /help for instructions.")
+            return
+
+        if not self.user_client.client:
+            try:
+                await self.user_client.start(user_data['api_id'], user_data['api_hash'], user_data.get('session_string'))
+            except Exception as e:
+                logger.error(f"Failed to start user client for user {user_id}: {str(e)}", exc_info=True)
+                await event.reply("Failed to start user client. Please check your API ID and API Hash.")
+                return
+
+        # Reset forwarding state
+        await db.save_user_credentials(user_id, {
+            'forwarding': True,
+            'messages_forwarded': 0,
+            'start_id': start_id,
+            'end_id': end_id,
+            'current_id': start_id
+        })
+
+        logger.info(f"User {user_id} started forwarding process from message ID {start_id} to {end_id}")
+        progress_message = await event.reply(f"Forwarding process started from message ID {start_id} to {end_id}. Use /status to check the progress.")
+
+        # Start the forwarding process in a new asyncio task
+        asyncio.create_task(self.forward_messages(user_id, bot, db, progress_message))
+
+    async def stop_forwarding(self, event, db):
+        user_id = event.sender_id
+        try:
+            await db.save_user_credentials(user_id, {'forwarding': False})
+            logger.info(f"User {user_id} requested to stop forwarding process")
+            await event.reply("Stopping the forwarding process. Please wait...")
+            
+            await self.interrupt_forwarding(user_id)
+            
+            await event.reply("Forwarding process has been stopped.")
+        except Exception as e:
+            logger.error(f"Unexpected error in stop_forwarding: {str(e)}", exc_info=True)
+            await event.reply("An unexpected error occurred. Please try again later.")
+
+    async def status(self, event, db):
+        user_id = event.sender_id
+        user_data = await db.get_user_credentials(user_id)
+        if user_data and user_data.get('forwarding'):
+            messages_forwarded = user_data.get('messages_forwarded', 0)
+            start_id = user_data.get('start_id')
+            end_id = user_data.get('end_id')
+            progress_percentage = (messages_forwarded / (end_id - start_id + 1)) * 100
+            await event.reply(f"Forwarding progress: {progress_percentage:.2f}% ({messages_forwarded}/{end_id - start_id + 1})")
+        else:
+            await event.reply("No forwarding process in progress.")

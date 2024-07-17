@@ -1,11 +1,12 @@
+# main.py
 import asyncio
 import logging
 from bot_client import BotClient
 from user_client import UserClient
-from commands import setup_commands
 from forwarder import Forwarder
 from config import load_config
 from database import db
+from utils import setup_commands
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ async def main():
         user_client = UserClient()
         forwarder = Forwarder(user_client, db, config)
 
-        setup_commands(bot, user_client, forwarder, db)
+        setup_commands(bot, user_client, forwarder)
         logger.info("Commands set up successfully")
 
         active_users = await db.get_active_users()

@@ -1,7 +1,7 @@
 # user_client.py
+import logging
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-import logging
 
 logger = logging.getLogger(__name__)
 
