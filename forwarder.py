@@ -1,5 +1,7 @@
+
 import asyncio
 import logging
+import random
 from telethon import types
 from telethon.helpers import generate_random_long
 from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLongError, ChatWriteForbiddenError
