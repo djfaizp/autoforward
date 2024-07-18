@@ -41,7 +41,10 @@ async def main():
         tasks = [forwarder.process_user_queue(user_id, bot, db, None) for user_id in active_users]
         logger.info(f"Created {len(tasks)} tasks for active users")
         
-        await asyncio.gather(*tasks)
+        # Start the forwarding worker
+        worker_task = asyncio.create_task(forwarder.worker())
+
+        await asyncio.gather(*tasks, worker_task)
         logger.info("All tasks have been processed")
 
         await bot.run_until_disconnected()
@@ -62,3 +65,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
+        
