@@ -10,8 +10,8 @@ from auth import (
     save_source_channel,
     save_destination_channel,
     AuthState,
-    send_otp,  # Ensure send_otp is imported
-    handle_retry_otp  # Ensure handle_retry_otp is imported
+    send_otp,
+    handle_retry_otp
 )
 from database import db
 from forwarder import Forwarder
@@ -32,6 +32,11 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     async def handle_auth(event):
         user_id = event.sender_id
         user_data = await db.get_user_credentials(user_id)
+        if user_data is None:
+            logger.error(f"No user data found for user ID {user_id}")
+            await event.reply("No user data found. Please start the authentication process again using /start.")
+            return
+        
         auth_state = user_data.get('auth_state')
         
         if auth_state == AuthState.REQUEST_API_ID:
@@ -77,3 +82,4 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         await handle_retry_otp(event)
 
     logger.info("Commands set up successfully")
+    
