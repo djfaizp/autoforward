@@ -70,7 +70,10 @@ class Database:
                     user_data['source_channel'] = int(user_data['source_channel'])
                 if 'destination_channel' in user_data:
                     user_data['destination_channel'] = int(user_data['destination_channel'])
-            return user_data
+                return user_data
+            else:
+                logger.warning(f"No user data found for user ID {user_id}")
+                return None
         except ValueError as e:
             logger.error(f"Invalid user_id: {str(e)}")
             raise
@@ -143,3 +146,4 @@ class Database:
             raise
 
 db = Database()
+            
