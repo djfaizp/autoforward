@@ -1,5 +1,3 @@
-# auth.py
-
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
@@ -173,3 +171,4 @@ async def handle_retry_otp(event):
         auth_state = user_data.get('auth_state')
         if auth_state == AuthState.VERIFY_OTP:
             await verify_otp(event, user_id, client)
+            
