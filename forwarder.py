@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import random
-import time
 from telethon import types
 from telethon.helpers import generate_random_long
 from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLongError, ChatWriteForbiddenError
@@ -22,6 +21,7 @@ class Forwarder:
         self.forward_delay_min = 60  # Increased minimum delay
         self.forward_delay_max = 180  # Increased maximum delay
         self.forwarding_tasks = {}
+        self.forwarded_cache = set()  # Clear cache on restart
         self.queue = deque()
 
     async def forward_messages(self, user_id, bot, db, progress_message, start_id=None, end_id=None):
@@ -113,7 +113,7 @@ class Forwarder:
 
             # Check if it's time for a longer pause (e.g., every 1000 messages)
             if messages_forwarded % 1000 == 0:
-                long_pause = random.randint(600, 1000)  # 10-20 minutes
+                long_pause = random.randint(600, 1200)  # 10-20 minutes
                 logger.info(f"Taking a longer pause of {long_pause} seconds after forwarding 1000 messages.")
                 await bot.send_message(user_id, f"Taking a {long_pause // 60}-minute break to avoid rate limits. The forwarding will resume automatically.")
                 await asyncio.sleep(long_pause)
@@ -203,14 +203,9 @@ class Forwarder:
             raise
 
     async def get_user_credentials(self, user_id):
-        if user_id in self.user_cache:
-            return self.user_cache[user_id]
-        user_data = await self.db.get_user_credentials(user_id)
-        self.user_cache[user_id] = user_data
-        return user_data
+        return await self.db.get_user_credentials(user_id)
 
     async def save_user_credentials(self, user_id, user_data):
-        self.user_cache[user_id] = user_data
         await self.db.save_user_credentials(user_id, user_data)
 
     async def worker(self):
@@ -325,4 +320,3 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-                    
