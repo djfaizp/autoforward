@@ -1,5 +1,6 @@
 # utils.py
 import logging
+import asyncio
 from telethon import events, Button
 from auth import (
     start_auth,
