@@ -1,4 +1,5 @@
 # forwarder.py
+
 import asyncio
 import logging
 import random
@@ -44,7 +45,6 @@ class Forwarder:
         total_messages = user_data['end_id'] - user_data['start_id'] + 1
         current_id = user_data['current_id']
         messages_forwarded = user_data['messages_forwarded']
-        last_progress_update = 0
 
         try:
             source_channel = await self.validate_channel(user_data['source'])
@@ -66,9 +66,7 @@ class Forwarder:
             messages_forwarded += sum(1 for msg in forwarded_batch if msg)
             current_id += self.max_forward_batch
 
-            if messages_forwarded - last_progress_update >= 100:  # Update progress every 100 messages
-                await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
-                last_progress_update = messages_forwarded
+            await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
 
             await asyncio.sleep(random.randint(self.forward_delay_min, self.forward_delay_max))
 
@@ -76,7 +74,7 @@ class Forwarder:
             if not user_data['forwarding']:
                 break
 
-        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
+        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages, final=True)
         await self.save_user_credentials(user_id, {'forwarding': False, 'messages_forwarded': messages_forwarded, 'current_id': current_id})
 
     async def process_message(self, message, user_id, destination_channel):
@@ -122,10 +120,17 @@ class Forwarder:
         else:
             return await self.user_client.client.send_message(destination_channel, message.text or "")
 
-    async def update_progress(self, user_id, bot, progress_message, messages_forwarded, total_messages):
+    async def update_progress(self, user_id, bot, progress_message, messages_forwarded, total_messages, final=False):
         progress_percentage = (messages_forwarded / total_messages) * 100
         progress_content = f"Forwarding progress: {progress_percentage:.2f}% ({messages_forwarded}/{total_messages})"
+        if final:
+            progress_content += "\nForwarding process completed."
+        
+        # Update the progress message
         await bot.edit_message(user_id, progress_message.id, progress_content)
+        
+        # Save the updated progress to the database
+        await self.db.update_forwarding_progress(user_id, messages_forwarded, current_id)
 
     async def ensure_user_client_started(self, user_data):
         if not self.user_client.client or not self.user_client.client.is_connected():
@@ -269,4 +274,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-        
+            
