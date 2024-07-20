@@ -3,7 +3,6 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
-from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +10,6 @@ class Database:
     def __init__(self):
         self.client = None
         self.db = None
-        self.user_cache = TTLCache(maxsize=100, ttl=300)  # In-memory cache for user credentials
-        self.forwarded_cache = TTLCache(maxsize=1000, ttl=600)  # In-memory cache for forwarded message IDs
-
     async def connect(self):
         try:
             mongodb_uri = os.getenv('MONGODB_URI')
