@@ -44,11 +44,8 @@ async def main():
         
         # Start the forwarding worker
         worker_task = asyncio.create_task(forwarder.worker())
-        
-        # Start system health monitoring
-        health_task = asyncio.create_task(monitor_system_health())
 
-        await asyncio.gather(*tasks, worker_task, health_task)
+        await asyncio.gather(*tasks, worker_task)
         logger.info("All tasks have been processed")
 
         await bot.run_until_disconnected()
@@ -63,12 +60,6 @@ async def main():
             await user_client.stop()
         await db.disconnect()
         logger.info("Bot has been disconnected and database connection closed")
-
-async def monitor_system_health():
-    while True:
-        mem = virtual_memory()
-        logger.info(f"Memory usage: {mem.percent}% used")
-        await asyncio.sleep(60)  # Adjust the monitoring interval as needed
 
 if __name__ == "__main__":
     try:
