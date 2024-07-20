@@ -2,13 +2,13 @@
 import asyncio
 import logging
 import random
+from collections import deque
 from telethon import types
 from telethon.helpers import generate_random_long
 from telethon.errors import FloodWaitError, MessageIdInvalidError, ChatWriteForbiddenError
 from telethon.tl.types import MessageMediaWebPage, MessageService
 from telethon.tl.functions.messages import ForwardMessagesRequest
 from rate_limiter import UserRateLimiter
-from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +18,9 @@ class Forwarder:
         self.db = db
         self.rate_limiter = UserRateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
-        self.max_forward_batch = 100
-        self.forward_delay_min = 100
-        self.forward_delay_max = 220
+        self.max_forward_batch = config.MAX_FORWARD_BATCH
+        self.forward_delay_min = config.FORWARD_DELAY_MIN
+        self.forward_delay_max = config.FORWARD_DELAY_MAX
         self.forwarding_tasks = {}
         self.queue = deque()
 
@@ -62,18 +62,18 @@ class Forwarder:
             if not valid_messages:
                 empty_batch_count += 1
                 logger.info(f"Empty batch encountered for user {user_id}. Batch range: {current_id} - {current_id + self.max_forward_batch - 1}")
-                
+
                 if empty_batch_count >= 5:
                     await bot.send_message(user_id, f"No valid messages found in the last {empty_batch_count} batches. The channel owner may have deleted these messages. Continuing to the next batch...")
                     empty_batch_count = 0
             else:
                 empty_batch_count = 0
-                
+
                 try:
                     await self.rate_limiter.wait(user_id)
                     from_peer = await self.user_client.client.get_input_entity(source_channel)
                     to_peer = await self.user_client.client.get_input_entity(destination_channel)
-                    
+
                     result = await self.user_client.client(ForwardMessagesRequest(
                         from_peer=from_peer,
                         id=[msg.id for msg in valid_messages],
@@ -146,7 +146,7 @@ class Forwarder:
         if message.media and not isinstance(message.media, MessageMediaWebPage):
             from_peer = await self.user_client.client.get_input_entity(message.peer_id)
             to_peer = await self.user_client.client.get_input_entity(destination_channel)
-            
+
             result = await self.user_client.client(ForwardMessagesRequest(
                 from_peer=from_peer,
                 id=[message.id],
@@ -154,11 +154,11 @@ class Forwarder:
                 random_id=[generate_random_long()],
                 drop_author=True
             ))
-            
+
             for update in result.updates:
                 if isinstance(update, types.UpdateNewChannelMessage):
                     return update.message
-            
+
             raise AttributeError(f"No 'UpdateNewChannelMessage' found in updates. Result: {result.to_dict()}")
         else:
             return await self.user_client.client.send_message(destination_channel, message.text or "")
@@ -168,9 +168,9 @@ class Forwarder:
         progress_content = f"Forwarding progress: {progress_percentage:.2f}% ({messages_forwarded}/{total_messages})"
         if final:
             progress_content += "\nForwarding process completed."
-        
+
         await bot.edit_message(user_id, progress_message.id, progress_content)
-        
+
         user_data = await self.get_user_credentials(user_id)
         user_data['messages_forwarded'] = messages_forwarded
         user_data['current_id'] = user_data['start_id'] + messages_forwarded
@@ -186,7 +186,7 @@ class Forwarder:
             if not self.user_client.client or not self.user_client.client.is_connected():
                 logger.error("User client is not connected")
                 raise ValueError("User client is not connected")
-            
+
             if isinstance(channel_id, str) and channel_id.startswith('-100'):
                 channel_id = int(channel_id)
             entity = await self.user_client.client.get_entity(channel_id)
@@ -265,9 +265,9 @@ class Forwarder:
             await self.save_user_credentials(user_id, {'forwarding': False})
             logger.info(f"User {user_id} requested to stop forwarding process")
             await event.reply("Stopping the forwarding process. Please wait...")
-            
+
             await self.interrupt_forwarding(user_id)
-            
+
             await event.reply("Forwarding process has been stopped.")
         except Exception as e:
             logger.error(f"Unexpected error in stop_forwarding: {str(e)}", exc_info=True)
@@ -311,4 +311,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-                    
+        
