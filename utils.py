@@ -1,7 +1,7 @@
 # utils.py
 
 import logging
-from telethon import events
+from telethon import events, Button
 from auth import (
     start_auth,
     save_api_id,
@@ -27,7 +27,12 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         if not user_data or not user_data.get('session_string'):
             await start_auth(event, user_id)
         else:
-            await event.reply("Welcome back! You are already authenticated. Use /help to see available commands.")
+            await event.reply(
+                "Welcome back! You are already authenticated. Use /help to see available commands.",
+                buttons=[
+                    [Button.inline("Help", b'help')]
+                ]
+            )
 
     @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/resume_forwarding)'))
     async def handle_auth(event):
@@ -88,7 +93,15 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         /status - Check the status of the forwarding process
         /resume_forwarding - Resume the forwarding process from the last stopped point
         """
-        await event.reply(help_text)
+        await event.reply(
+            help_text,
+            buttons=[
+                [Button.inline("Start Forwarding", b'start_forwarding')],
+                [Button.inline("Stop Forwarding", b'stop_forwarding')],
+                [Button.inline("Check Status", b'status')],
+                [Button.inline("Resume Forwarding", b'resume_forwarding')]
+            ]
+        )
 
     @bot.on(events.NewMessage(pattern='/resume_forwarding'))
     async def resume_forwarding_command(event):
