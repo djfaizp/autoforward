@@ -8,7 +8,6 @@ from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLon
 from telethon.tl.types import MessageMediaWebPage, MessageService
 from telethon.tl.functions.messages import ForwardMessagesRequest
 from rate_limiter import UserRateLimiter
-from cachetools import TTLCache
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -23,8 +22,6 @@ class Forwarder:
         self.forward_delay_min = 60  # Increased minimum delay
         self.forward_delay_max = 180  # Increased maximum delay
         self.forwarding_tasks = {}
-        self.forwarded_cache = set()
-        self.user_cache = TTLCache(maxsize=100, ttl=300)
         self.queue = deque()
 
     async def forward_messages(self, user_id, bot, db, progress_message, start_id=None, end_id=None):
