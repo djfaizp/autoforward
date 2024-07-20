@@ -1,6 +1,8 @@
 # file: main.py
 import asyncio
 import logging
+import os
+import shutil
 from bot_client import BotClient
 from user_client import UserClient
 from forwarder import Forwarder
@@ -15,10 +17,29 @@ logging.getLogger('telethon').setLevel(logging.WARNING)
 logging.getLogger('telethon.network.mtprotosender').setLevel(logging.WARNING)
 logging.getLogger('telethon.network.connection.connection').setLevel(logging.WARNING)
 
+def clear_cache():
+    """Clear Python cache by removing .pyc files and __pycache__ directories."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    for root, dirs, files in os.walk(current_dir):
+        for dir in dirs:
+            if dir == "__pycache__":
+                cache_dir = os.path.join(root, dir)
+                logger.info(f"Removing cache directory: {cache_dir}")
+                shutil.rmtree(cache_dir)
+        for file in files:
+            if file.endswith(".pyc"):
+                cache_file = os.path.join(root, file)
+                logger.info(f"Removing cache file: {cache_file}")
+                os.remove(cache_file)
+
 async def main():
     bot = None
     user_client = None
     try:
+        logger.info("Clearing Python cache...")
+        clear_cache()
+        logger.info("Cache cleared successfully")
+
         config = load_config()
         logger.info("Configuration loaded successfully")
         
