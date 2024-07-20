@@ -34,10 +34,9 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         user_id = event.sender_id
         user_data = await db.get_user_credentials(user_id)
         if user_data is None:
-            logger.error(f"No user data found for user ID {user_id}")
-            await event.reply("No user data found. Please start the authentication process again using /start.")
-            return
-        
+            logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
+            return  # Skip processing if no user data is found
+
         auth_state = user_data.get('auth_state')
         
         if auth_state == AuthState.REQUEST_API_ID:
@@ -144,3 +143,4 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             await event.reply(f"Error retrying OTP: {str(e)}")
 
     logger.info("Commands set up successfully")
+    
