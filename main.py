@@ -31,6 +31,7 @@ async def main():
         user_client = UserClient()
         forwarder = Forwarder(user_client, db, config)
 
+        # Set up commands
         setup_commands(bot, user_client, forwarder)
         logger.info("Commands set up successfully")
 
@@ -42,10 +43,10 @@ async def main():
         
         worker_task = asyncio.create_task(forwarder.worker())
 
-        await asyncio.gather(*tasks, worker_task)
+        # Run the bot and other tasks concurrently
+        await asyncio.gather(bot.run_until_disconnected(), *tasks, worker_task)
         logger.info("All tasks have been processed")
 
-        await bot.run_until_disconnected()
     except asyncio.CancelledError:
         logger.info("Main task was cancelled.")
     except Exception as e:
@@ -63,4 +64,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
-        
