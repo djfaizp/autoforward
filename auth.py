@@ -1,14 +1,17 @@
 # auth.py
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
-    PhoneCodeInvalidError, PhoneCodeExpiredError, 
-    SessionPasswordNeededError, PasswordHashInvalidError
+    PhoneCodeInvalidError, PhoneCodeExpiredError,
+    SessionPasswordNeededError, PasswordHashInvalidError,
+    FloodWaitError
 )
 from telethon.tl.custom import Button
 from telethon import events
 from database import db
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,10 @@ async def verify_otp(event, user_id, client):
         ])
     except SessionPasswordNeededError:
         await request_2fa_password(event, user_id, client)
+    except FloodWaitError as e:
+        logger.warning(f"Flood wait error: must wait for {e.seconds} seconds.")
+        await asyncio.sleep(e.seconds)
+        await verify_otp(event, user_id, client)  # Retry after waiting
     except Exception as e:
         logger.error(f"Error verifying OTP: {str(e)}")
         await event.reply(f"❖ OTP verification failed: {str(e)}. Please try again.", buttons=[
@@ -109,6 +116,10 @@ async def verify_2fa_password(event, user_id, password, client):
     except PasswordHashInvalidError:
         await event.reply("❖ The password you provided is incorrect. Please try again.")
         await request_2fa_password(event, user_id, client)
+    except FloodWaitError as e:
+        logger.warning(f"Flood wait error: must wait for {e.seconds} seconds.")
+        await asyncio.sleep(e.seconds)
+        await verify_2fa_password(event, user_id, password, client)  # Retry after waiting
     except Exception as e:
         logger.error(f"Error verifying 2FA password: {str(e)}")
         await event.reply(f"❖ 2FA password verification failed: {str(e)}. Please try again.")
