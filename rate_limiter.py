@@ -1,5 +1,3 @@
-# rate_limiter.py
-
 import asyncio
 import time
 from collections import defaultdict, deque
