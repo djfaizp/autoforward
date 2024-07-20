@@ -124,8 +124,8 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             await event.reply("Forwarding is already in progress. Use /status to check the progress.")
             return
 
-        start_id = user_data['current_id']
-        end_id = user_data['end_id']
+        start_id = user_data.get('current_id')
+        end_id = user_data.get('end_id')
         await db.save_user_credentials(user_id, {'forwarding': True})
 
         logger.info(f"User {user_id} resumed forwarding process from message ID {start_id} to {end_id}")
