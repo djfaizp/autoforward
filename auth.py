@@ -1,3 +1,4 @@
+# auth.py
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
