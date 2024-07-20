@@ -1,5 +1,3 @@
-# main.py
-
 import asyncio
 import logging
 from bot_client import BotClient
@@ -42,7 +40,6 @@ async def main():
         tasks = [forwarder.process_user_queue(user_id, bot, db, None) for user_id in active_users]
         logger.info(f"Created {len(tasks)} tasks for active users")
         
-        # Start the forwarding worker
         worker_task = asyncio.create_task(forwarder.worker())
 
         await asyncio.gather(*tasks, worker_task)
