@@ -155,4 +155,3 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             await event.reply(f"Error retrying OTP: {str(e)}")
 
     logger.info("Commands set up successfully")
-                
