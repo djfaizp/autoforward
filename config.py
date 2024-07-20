@@ -1,5 +1,3 @@
-# config.py
-
 from pydantic import BaseModel, ValidationError, field_validator
 import os
 from dotenv import load_dotenv
@@ -15,7 +13,7 @@ class Config(BaseModel):
     FORWARD_DELAY_MAX: int = 120
     MONGODB_URI: str
     DB_NAME: str
-    TELETHON_REQUEST_RETRIES: int = 5  # Configuration for Telethon retries
+    TELETHON_REQUEST_RETRIES: int = 5
 
     @field_validator('API_ID', 'MAX_FORWARD_BATCH', 'FORWARD_DELAY_MIN', 'FORWARD_DELAY_MAX', 'TELETHON_REQUEST_RETRIES')
     def must_be_int(cls, v):
