@@ -1,4 +1,5 @@
 # utils.py
+
 import logging
 from telethon import events
 from auth import (
@@ -28,7 +29,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         else:
             await event.reply("Welcome back! You are already authenticated. Use /help to see available commands.")
 
-    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status)'))
+    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/resume_forwarding)'))
     async def handle_auth(event):
         user_id = event.sender_id
         user_data = await db.get_user_credentials(user_id)
@@ -55,15 +56,27 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
 
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
     async def start_forwarding_command(event):
-        await forwarder.start_forwarding(event, bot, db)
+        try:
+            await forwarder.start_forwarding(event, bot, db)
+        except Exception as e:
+            logger.error(f"Error in start_forwarding_command: {str(e)}")
+            await event.reply(f"Error starting forwarding: {str(e)}")
 
     @bot.on(events.NewMessage(pattern='/stop_forwarding'))
     async def stop_forwarding_command(event):
-        await forwarder.stop_forwarding(event, db)
+        try:
+            await forwarder.stop_forwarding(event, db)
+        except Exception as e:
+            logger.error(f"Error in stop_forwarding_command: {str(e)}")
+            await event.reply(f"Error stopping forwarding: {str(e)}")
 
     @bot.on(events.NewMessage(pattern='/status'))
     async def status_command(event):
-        await forwarder.status(event, db)
+        try:
+            await forwarder.status(event, db)
+        except Exception as e:
+            logger.error(f"Error in status_command: {str(e)}")
+            await event.reply(f"Error retrieving status: {str(e)}")
 
     @bot.on(events.NewMessage(pattern='/help'))
     async def help_command(event):
@@ -74,12 +87,60 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         /start_forwarding <start_id>-<end_id> - Start the forwarding process
         /stop_forwarding - Stop the forwarding process
         /status - Check the status of the forwarding process
+        /resume_forwarding - Resume the forwarding process from the last stopped point
         """
         await event.reply(help_text)
 
+    @bot.on(events.NewMessage(pattern='/resume_forwarding'))
+    async def resume_forwarding_command(event):
+        user_id = event.sender_id
+
+        user_data = await db.get_user_credentials(user_id)
+        if not user_data:
+            logger.warning(f"User {user_id} attempted to resume forwarding without any credentials")
+            await event.reply("Please set up your credentials first. Use /help to see the available commands.")
+            return
+
+        missing_credentials = []
+        for cred in ['api_id', 'api_hash', 'source', 'destination']:
+            if cred not in user_data:
+                missing_credentials.append(cred.replace('_', ' ').title())
+
+        if missing_credentials:
+            missing_cred_str = ", ".join(missing_credentials)
+            logger.warning(f"User {user_id} attempted to resume forwarding with missing credentials: {missing_cred_str}")
+            await event.reply(f"Please set up the following before resuming: {missing_cred_str}. Use /help for instructions.")
+            return
+
+        if not user_client.client:
+            try:
+                await user_client.start(user_data['api_id'], user_data['api_hash'], user_data.get('session_string'))
+            except Exception as e:
+                logger.error(f"Failed to start user client for user {user_id}: {str(e)}", exc_info=True)
+                await event.reply("Failed to start user client. Please check your API ID and API Hash.")
+                return
+
+        if user_data.get('forwarding'):
+            logger.info(f"User {user_id} attempted to resume forwarding while it's already in progress")
+            await event.reply("Forwarding is already in progress. Use /status to check the progress.")
+            return
+
+        start_id = user_data['current_id']
+        end_id = user_data['end_id']
+        await db.save_user_credentials(user_id, {'forwarding': True})
+
+        logger.info(f"User {user_id} resumed forwarding process from message ID {start_id} to {end_id}")
+        progress_message = await event.reply(f"Resumed forwarding process from message ID {start_id} to {end_id}. Use /status to check the progress.")
+
+        # Resume the forwarding process in a new asyncio task
+        asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message, start_id=start_id, end_id=end_id))
+
     @bot.on(events.CallbackQuery(data=b'retry_otp'))
     async def handle_retry_otp_command(event):
-        await handle_retry_otp(event)
+        try:
+            await handle_retry_otp(event)
+        except Exception as e:
+            logger.error(f"Error in handle_retry_otp_command: {str(e)}")
+            await event.reply(f"Error retrying OTP: {str(e)}")
 
     logger.info("Commands set up successfully")
-    
