@@ -1,7 +1,5 @@
-# file: utils.py
-
+# utils.py
 import logging
-import asyncio
 from telethon import events, Button
 from auth import (
     start_auth,
@@ -155,30 +153,5 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             logger.error(f"Error in handle_retry_otp_command: {str(e)}")
             await event.reply(f"Error retrying OTP: {str(e)}")
 
-    # Inline button handlers
-    @bot.on(events.CallbackQuery(data=b'start_forwarding'))
-    async def start_forwarding_button(event):
-        await event.answer()
-        await event.reply("Please use the /start_forwarding command followed by the message ID range, e.g., /start_forwarding 1000-2000")
-
-    @bot.on(events.CallbackQuery(data=b'stop_forwarding'))
-    async def stop_forwarding_button(event):
-        await event.answer()
-        await stop_forwarding_command(event)
-
-    @bot.on(events.CallbackQuery(data=b'status'))
-    async def status_button(event):
-        await event.answer()
-        await status_command(event)
-
-    @bot.on(events.CallbackQuery(data=b'resume_forwarding'))
-    async def resume_forwarding_button(event):
-        await event.answer()
-        await resume_forwarding_command(event)
-
-    @bot.on(events.CallbackQuery(data=b'help'))
-    async def help_button(event):
-        await event.answer()
-        await help_command(event)
-
     logger.info("Commands set up successfully")
+                
