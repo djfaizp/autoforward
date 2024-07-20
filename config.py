@@ -1,4 +1,4 @@
-file: config.py
+#file: config.py
 from pydantic import BaseModel, ValidationError, field_validator
 import os
 from dotenv import load_dotenv
