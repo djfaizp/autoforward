@@ -1,5 +1,3 @@
-# utils.py
-
 import logging
 from telethon import events, Button
 from auth import (
@@ -144,7 +142,6 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         logger.info(f"User {user_id} resumed forwarding process from message ID {start_id} to {end_id}")
         progress_message = await event.reply(f"Resumed forwarding process from message ID {start_id} to {end_id}. Use /status to check the progress.")
 
-        # Resume the forwarding process in a new asyncio task
         asyncio.create_task(forwarder.forward_messages(user_id, bot, db, progress_message, start_id=start_id, end_id=end_id))
 
     @bot.on(events.CallbackQuery(data=b'retry_otp'))
