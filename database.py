@@ -1,4 +1,4 @@
-#file: database.py
+# file: database.py
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
@@ -30,9 +30,27 @@ class Database:
             logger.info("Disconnected from MongoDB")
 
     async def ensure_indexes(self):
-        indexes = await self.db.users.index_information()
-        if 'user_id_1' not in indexes:
-            await self.db.users.create_index('user_id', unique=True)
+        try:
+            # Ensure indexes for users collection
+            user_indexes = await self.db.users.index_information()
+            if 'user_id_1' not in user_indexes:
+                await self.db.users.create_index('user_id', unique=True)
+                logger.info("Created index for user_id in users collection")
+            
+            # Ensure indexes for forwarded_messages collection
+            forwarded_messages_indexes = await self.db.forwarded_messages.index_information()
+            if 'user_id_1_message_id_1' not in forwarded_messages_indexes:
+                await self.db.forwarded_messages.create_index([('user_id', 1), ('message_id', 1)], unique=True)
+                logger.info("Created composite index for user_id and message_id in forwarded_messages collection")
+
+            # Ensure indexes for forwarded_filenames collection
+            forwarded_filenames_indexes = await self.db.forwarded_filenames.index_information()
+            if 'user_id_1_filename_1' not in forwarded_filenames_indexes:
+                await self.db.forwarded_filenames.create_index([('user_id', 1), ('filename', 1)], unique=True)
+                logger.info("Created composite index for user_id and filename in forwarded_filenames collection")
+        except Exception as e:
+            logger.error(f"Failed to create indexes: {str(e)}", exc_info=True)
+            raise
 
     async def save_user_credentials(self, user_id, credentials):
         try:
@@ -43,6 +61,10 @@ class Database:
                 credentials['source_channel'] = int(credentials['source_channel'])
             if 'destination_channel' in credentials:
                 credentials['destination_channel'] = int(credentials['destination_channel'])
+            if 'current_id' in credentials:
+                credentials['current_id'] = int(credentials['current_id'])
+            if 'messages_forwarded' in credentials:
+                credentials['messages_forwarded'] = int(credentials['messages_forwarded'])
 
             users_collection = self.db.users
             await users_collection.update_one(
@@ -70,6 +92,10 @@ class Database:
                     user_data['source_channel'] = int(user_data['source_channel'])
                 if 'destination_channel' in user_data:
                     user_data['destination_channel'] = int(user_data['destination_channel'])
+                if 'current_id' in user_data:
+                    user_data['current_id'] = int(user_data['current_id'])
+                if 'messages_forwarded' in user_data:
+                    user_data['messages_forwarded'] = int(user_data['messages_forwarded'])
                 return user_data
             else:
                 logger.warning(f"No user data found for user ID {user_id}")
