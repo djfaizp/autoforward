@@ -130,7 +130,10 @@ class Forwarder:
         await bot.edit_message(user_id, progress_message.id, progress_content)
         
         # Save the updated progress to the database
-        await self.db.update_forwarding_progress(user_id, messages_forwarded, current_id)
+        user_data = await self.get_user_credentials(user_id)
+        user_data['messages_forwarded'] = messages_forwarded
+        user_data['current_id'] = user_data['start_id'] + messages_forwarded
+        await self.save_user_credentials(user_id, user_data)
 
     async def ensure_user_client_started(self, user_data):
         if not self.user_client.client or not self.user_client.client.is_connected():
@@ -157,7 +160,6 @@ class Forwarder:
         user_data = await self.db.get_user_credentials(user_id)
         self.user_cache[user_id] = user_data
         return user_data
-
     async def save_user_credentials(self, user_id, user_data):
         self.user_cache[user_id] = user_data
         await self.db.save_user_credentials(user_id, user_data)
@@ -274,4 +276,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-            
+        
