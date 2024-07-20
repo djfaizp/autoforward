@@ -1,5 +1,4 @@
 # database.py
-
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
@@ -10,6 +9,7 @@ class Database:
     def __init__(self):
         self.client = None
         self.db = None
+
     async def connect(self):
         try:
             mongodb_uri = os.getenv('MONGODB_URI')
@@ -50,7 +50,6 @@ class Database:
                 {'$set': credentials},
                 upsert=True
             )
-            self.user_cache[user_id] = credentials  # Update cache
             logger.info(f"Saved credentials for user {user_id}")
         except ValueError as e:
             logger.error(f"Invalid value in credentials for user {user_id}: {str(e)}")
@@ -62,8 +61,6 @@ class Database:
     async def get_user_credentials(self, user_id):
         try:
             user_id = int(user_id)
-            if user_id in self.user_cache:
-                return self.user_cache[user_id]  # Return cached credentials
             users_collection = self.db.users
             user_data = await users_collection.find_one({'user_id': user_id})
             if user_data:
@@ -73,7 +70,6 @@ class Database:
                     user_data['source_channel'] = int(user_data['source_channel'])
                 if 'destination_channel' in user_data:
                     user_data['destination_channel'] = int(user_data['destination_channel'])
-                self.user_cache[user_id] = user_data  # Cache the fetched data
                 return user_data
             else:
                 logger.warning(f"No user data found for user ID {user_id}")
@@ -93,19 +89,14 @@ class Database:
                 {'$set': {'forwarded': True}},
                 upsert=True
             )
-            self.forwarded_cache[(user_id, message_id)] = True  # Update cache
         except Exception as e:
             logger.error(f"Failed to mark message as forwarded: {str(e)}", exc_info=True)
             raise
 
     async def is_message_forwarded(self, user_id, message_id):
         try:
-            if (user_id, message_id) in self.forwarded_cache:
-                return True  # Check cache first
             forwarded_messages = self.db.forwarded_messages
             result = await forwarded_messages.find_one({'user_id': user_id, 'message_id': message_id, 'forwarded': True})
-            if result:
-                self.forwarded_cache[(user_id, message_id)] = True  # Update cache if found
             return result is not None
         except Exception as e:
             logger.error(f"Failed to check if message is forwarded: {str(e)}", exc_info=True)
