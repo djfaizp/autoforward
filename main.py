@@ -1,3 +1,4 @@
+# file: main.py
 import asyncio
 import logging
 from bot_client import BotClient
