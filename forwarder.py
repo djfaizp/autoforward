@@ -1,8 +1,7 @@
-# forwarder.py
-
 import asyncio
 import logging
 import random
+import time
 from telethon import types
 from telethon.helpers import generate_random_long
 from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLongError, ChatWriteForbiddenError
@@ -20,13 +19,13 @@ class Forwarder:
         self.db = db
         self.rate_limiter = UserRateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
-        self.max_forward_batch = config.MAX_FORWARD_BATCH
-        self.forward_delay_min = config.FORWARD_DELAY_MIN
-        self.forward_delay_max = config.FORWARD_DELAY_MAX
+        self.max_forward_batch = 100
+        self.forward_delay_min = 60  # Increased minimum delay
+        self.forward_delay_max = 180  # Increased maximum delay
         self.forwarding_tasks = {}
-        self.forwarded_cache = set()  # In-memory cache for forwarded messages
-        self.user_cache = TTLCache(maxsize=100, ttl=300)  # Caching user credentials
-        self.queue = deque()  # Task queue
+        self.forwarded_cache = set()
+        self.user_cache = TTLCache(maxsize=100, ttl=300)
+        self.queue = deque()
 
     async def forward_messages(self, user_id, bot, db, progress_message, start_id=None, end_id=None):
         user_data = await self.get_user_credentials(user_id)
@@ -45,6 +44,9 @@ class Forwarder:
         total_messages = user_data['end_id'] - user_data['start_id'] + 1
         current_id = user_data['current_id']
         messages_forwarded = user_data['messages_forwarded']
+        last_progress_update = 0
+        empty_batch_count = 0
+        flood_wait_time = 1
 
         try:
             source_channel = await self.validate_channel(user_data['source'])
@@ -58,23 +60,72 @@ class Forwarder:
             batch_message_ids = list(range(current_id, min(current_id + self.max_forward_batch, user_data['end_id'] + 1)))
             batch_messages = await self.user_client.client.get_messages(source_channel, ids=batch_message_ids)
 
-            forwarded_batch = await asyncio.gather(*[
-                self.process_message(message, user_id, destination_channel)
-                for message in batch_messages if message and not isinstance(message, MessageService)
-            ])
+            valid_messages = [msg for msg in batch_messages if msg and not isinstance(msg, MessageService)]
 
-            messages_forwarded += sum(1 for msg in forwarded_batch if msg)
+            if not valid_messages:
+                empty_batch_count += 1
+                logger.info(f"Empty batch encountered for user {user_id}. Batch range: {current_id} - {current_id + self.max_forward_batch - 1}")
+                
+                if empty_batch_count >= 5:
+                    await bot.send_message(user_id, f"No valid messages found in the last {empty_batch_count} batches. The channel owner may have deleted these messages. Continuing to the next batch...")
+                    empty_batch_count = 0
+            else:
+                empty_batch_count = 0
+                
+                try:
+                    await self.rate_limiter.wait(user_id)
+                    from_peer = await self.user_client.client.get_input_entity(source_channel)
+                    to_peer = await self.user_client.client.get_input_entity(destination_channel)
+                    
+                    result = await self.user_client.client(ForwardMessagesRequest(
+                        from_peer=from_peer,
+                        id=[msg.id for msg in valid_messages],
+                        to_peer=to_peer,
+                        random_id=[generate_random_long() for _ in valid_messages],
+                        drop_author=True
+                    ))
+
+                    forwarded_count = sum(1 for update in result.updates if isinstance(update, types.UpdateNewChannelMessage))
+                    messages_forwarded += forwarded_count
+
+                    for msg in valid_messages:
+                        self.forwarded_cache.add(msg.id)
+                        await self.db.mark_message_as_forwarded(user_id, msg.id)
+
+                    # Reset flood wait time after successful forwarding
+                    flood_wait_time = 1
+
+                except FloodWaitError as fwe:
+                    logger.warning(f"FloodWaitError encountered. Waiting for {fwe.seconds} seconds.")
+                    await bot.send_message(user_id, f"Rate limit reached. Pausing for {fwe.seconds} seconds to avoid being blocked.")
+                    await asyncio.sleep(fwe.seconds)
+                    flood_wait_time *= 2  # Exponential backoff
+                except Exception as e:
+                    logger.error(f"Error forwarding batch: {str(e)}", exc_info=True)
+
             current_id += self.max_forward_batch
 
-            await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
+            if messages_forwarded - last_progress_update >= 100:
+                await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
+                last_progress_update = messages_forwarded
 
-            await asyncio.sleep(random.randint(self.forward_delay_min, self.forward_delay_max))
+            # Dynamic delay based on recent flood wait errors
+            delay = random.randint(self.forward_delay_min, self.forward_delay_max) * flood_wait_time
+            logger.info(f"Pausing for {delay} seconds before next batch.")
+            await asyncio.sleep(delay)
+
+            # Check if it's time for a longer pause (e.g., every 1000 messages)
+            if messages_forwarded % 1000 == 0:
+                long_pause = random.randint(600, 1000)  # 10-20 minutes
+                logger.info(f"Taking a longer pause of {long_pause} seconds after forwarding 1000 messages.")
+                await bot.send_message(user_id, f"Taking a {long_pause // 60}-minute break to avoid rate limits. The forwarding will resume automatically.")
+                await asyncio.sleep(long_pause)
 
             user_data = await self.get_user_credentials(user_id)
             if not user_data['forwarding']:
                 break
 
-        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages, final=True)
+        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
         await self.save_user_credentials(user_id, {'forwarding': False, 'messages_forwarded': messages_forwarded, 'current_id': current_id})
 
     async def process_message(self, message, user_id, destination_channel):
@@ -160,6 +211,7 @@ class Forwarder:
         user_data = await self.db.get_user_credentials(user_id)
         self.user_cache[user_id] = user_data
         return user_data
+
     async def save_user_credentials(self, user_id, user_data):
         self.user_cache[user_id] = user_data
         await self.db.save_user_credentials(user_id, user_data)
@@ -276,4 +328,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-        
+                    
