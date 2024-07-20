@@ -19,8 +19,8 @@ class Forwarder:
         self.rate_limiter = UserRateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
         self.max_forward_batch = 100
-        self.forward_delay_min = 60
-        self.forward_delay_max = 180
+        self.forward_delay_min = 100
+        self.forward_delay_max = 220
         self.forwarding_tasks = {}
         self.queue = deque()
 
@@ -109,9 +109,9 @@ class Forwarder:
             await asyncio.sleep(delay)
 
             if messages_forwarded % 1000 == 0:
-                long_pause = random.randint(600, 1200)
+                long_pause = random.randint(800, 1200)
                 logger.info(f"Taking a longer pause of {long_pause} seconds after forwarding 1000 messages.")
-                await bot.send_message(user_id, f"Taking a {long_pause // 60}-minute break to avoid rate limits. The forwarding will resume automatically.")
+                await bot.send_message(user_id, f"Taking a {long_pause // 30}-minute break to avoid rate limits. The forwarding will resume automatically.")
                 await asyncio.sleep(long_pause)
 
             user_data = await self.get_user_credentials(user_id)
