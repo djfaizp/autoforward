@@ -3,7 +3,7 @@ import logging
 import random
 from telethon import types
 from telethon.helpers import generate_random_long
-from telethon.errors import FloodWaitError, MessageIdInvalidError, MessageTooLongError, ChatWriteForbiddenError
+from telethon.errors import FloodWaitError, MessageIdInvalidError, ChatWriteForbiddenError
 from telethon.tl.types import MessageMediaWebPage, MessageService
 from telethon.tl.functions.messages import ForwardMessagesRequest
 from rate_limiter import UserRateLimiter
@@ -18,10 +18,9 @@ class Forwarder:
         self.rate_limiter = UserRateLimiter(config.MAX_FORWARD_BATCH, 60)
         self.max_retries = max_retries
         self.max_forward_batch = 100
-        self.forward_delay_min = 60  # Increased minimum delay
-        self.forward_delay_max = 180  # Increased maximum delay
+        self.forward_delay_min = 60
+        self.forward_delay_max = 180
         self.forwarding_tasks = {}
-        self.forwarded_cache = set()  # Clear cache on restart
         self.queue = deque()
 
     async def forward_messages(self, user_id, bot, db, progress_message, start_id=None, end_id=None):
@@ -86,10 +85,8 @@ class Forwarder:
                     messages_forwarded += forwarded_count
 
                     for msg in valid_messages:
-                        self.forwarded_cache.add(msg.id)
                         await self.db.mark_message_as_forwarded(user_id, msg.id)
 
-                    # Reset flood wait time after successful forwarding
                     flood_wait_time = 1
 
                 except FloodWaitError as fwe:
@@ -106,14 +103,12 @@ class Forwarder:
                 await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
                 last_progress_update = messages_forwarded
 
-            # Dynamic delay based on recent flood wait errors
             delay = random.randint(self.forward_delay_min, self.forward_delay_max) * flood_wait_time
             logger.info(f"Pausing for {delay} seconds before next batch.")
             await asyncio.sleep(delay)
 
-            # Check if it's time for a longer pause (e.g., every 1000 messages)
             if messages_forwarded % 1000 == 0:
-                long_pause = random.randint(600, 1200)  # 10-20 minutes
+                long_pause = random.randint(600, 1200)
                 logger.info(f"Taking a longer pause of {long_pause} seconds after forwarding 1000 messages.")
                 await bot.send_message(user_id, f"Taking a {long_pause // 60}-minute break to avoid rate limits. The forwarding will resume automatically.")
                 await asyncio.sleep(long_pause)
@@ -122,11 +117,11 @@ class Forwarder:
             if not user_data['forwarding']:
                 break
 
-        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages)
+        await self.update_progress(user_id, bot, progress_message, messages_forwarded, total_messages, final=True)
         await self.save_user_credentials(user_id, {'forwarding': False, 'messages_forwarded': messages_forwarded, 'current_id': current_id})
 
     async def process_message(self, message, user_id, destination_channel):
-        if message.id in self.forwarded_cache or await self.db.is_message_forwarded(user_id, message.id):
+        if await self.db.is_message_forwarded(user_id, message.id):
             return None
 
         for retry in range(self.max_retries):
@@ -134,7 +129,6 @@ class Forwarder:
                 await self.rate_limiter.wait(user_id)
                 sent_message = await self.forward_message(message, destination_channel)
                 if sent_message:
-                    self.forwarded_cache.add(message.id)
                     await self.db.mark_message_as_forwarded(user_id, message.id)
                     return sent_message
             except FloodWaitError as fwe:
@@ -174,10 +168,8 @@ class Forwarder:
         if final:
             progress_content += "\nForwarding process completed."
         
-        # Update the progress message
         await bot.edit_message(user_id, progress_message.id, progress_content)
         
-        # Save the updated progress to the database
         user_data = await self.get_user_credentials(user_id)
         user_data['messages_forwarded'] = messages_forwarded
         user_data['current_id'] = user_data['start_id'] + messages_forwarded
@@ -252,7 +244,6 @@ class Forwarder:
                 await event.reply("Failed to start user client. Please check your API ID and API Hash.")
                 return
 
-        # Reset forwarding state
         await self.save_user_credentials(user_id, {
             'forwarding': True,
             'messages_forwarded': 0,
@@ -264,7 +255,6 @@ class Forwarder:
         logger.info(f"User {user_id} started forwarding process from message ID {start_id} to {end_id}")
         progress_message = await event.reply(f"Forwarding process started from message ID {start_id} to {end_id}. Use /status to check the progress.")
 
-        # Add the task to the queue
         self.queue.append((user_id, bot, db, progress_message, start_id, end_id))
         logger.info(f"User {user_id} added to the forwarding queue with range {start_id}-{end_id}")
 
@@ -320,3 +310,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
+                    
