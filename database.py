@@ -54,6 +54,9 @@ class Database:
 
     async def save_user_credentials(self, user_id, credentials):
         try:
+            if not is_valid_user_id(user_id):
+                raise ValueError("Invalid user ID")
+
             user_id = int(user_id)
             if 'api_id' in credentials:
                 credentials['api_id'] = int(credentials['api_id'])
@@ -82,6 +85,9 @@ class Database:
 
     async def get_user_credentials(self, user_id):
         try:
+            if not is_valid_user_id(user_id):
+                raise ValueError("Invalid user ID")
+
             user_id = int(user_id)
             users_collection = self.db.users
             user_data = await users_collection.find_one({'user_id': user_id})
@@ -171,5 +177,9 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to get active users: {str(e)}", exc_info=True)
             raise
+
+    def is_valid_user_id(self, user_id):
+        # Check if the user ID is a valid Telegram user ID (positive number)
+        return user_id > 0
 
 db = Database()
