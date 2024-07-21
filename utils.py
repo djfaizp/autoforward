@@ -6,8 +6,7 @@ from auth import (
     start_auth,
     save_api_id,
     save_api_hash,
-    save_phone_number,
-    verify_otp,
+    handle_phone_number_and_otp,
     save_source_channel,
     save_destination_channel,
     AuthState,
@@ -58,9 +57,9 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         elif auth_state == AuthState.REQUEST_API_HASH:
             await save_api_hash(event, user_id)
         elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
-            await save_phone_number(event, user_id)
+            await handle_phone_number_and_otp(event, user_id)
         elif auth_state == AuthState.VERIFY_OTP:
-            await verify_otp(event, user_id)
+            await handle_phone_number_and_otp(event, user_id)
         elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
             await save_source_channel(event, user_id)
         elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
@@ -119,4 +118,3 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             await event.reply(f"Error retrying OTP: {str(e)}")
 
     logger.info("Commands set up successfully")
-    
