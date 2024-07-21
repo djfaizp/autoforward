@@ -10,7 +10,6 @@ from auth import (
     save_source_channel,
     save_destination_channel,
     AuthState,
-    send_otp,
     handle_retry_otp
 )
 from database import db
@@ -56,9 +55,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             await save_api_id(event, user_id)
         elif auth_state == AuthState.REQUEST_API_HASH:
             await save_api_hash(event, user_id)
-        elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
-            await handle_phone_number_and_otp(event, user_id)
-        elif auth_state == AuthState.VERIFY_OTP:
+        elif auth_state == AuthState.REQUEST_PHONE_NUMBER or auth_state == AuthState.VERIFY_OTP:
             await handle_phone_number_and_otp(event, user_id)
         elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
             await save_source_channel(event, user_id)
