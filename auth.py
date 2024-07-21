@@ -1,3 +1,4 @@
+# file: auth.py
 import logging
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
@@ -104,4 +105,3 @@ async def save_destination_channel(event, user_id):
     destination_channel = event.message.message
     await db.save_user_credentials(user_id, {'destination_channel': destination_channel, 'auth_state': AuthState.FINALIZE})
     await event.reply("Thank you! Your setup is complete. You can now use /start_forwarding to begin forwarding messages.")
-    
