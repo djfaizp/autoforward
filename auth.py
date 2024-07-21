@@ -97,12 +97,20 @@ async def authenticate_user(event, user_id):
         await client.disconnect()
 
 async def wait_for_otp(event):
+    future = asyncio.get_event_loop().create_future()
+    
+    @event.client.on(events.NewMessage(from_users=event.sender_id))
+    async def handler(response_event):
+        future.set_result(response_event.message.text)
+        raise events.StopPropagation
+    
     try:
-        response = await event.client.wait_for(events.NewMessage(from_users=event.sender_id), timeout=300)
-        return response.message.text
+        return await asyncio.wait_for(future, timeout=300)
     except asyncio.TimeoutError:
         await event.reply("OTP input timed out. Please restart the authentication process with /start.")
         raise
+    finally:
+        event.client.remove_event_handler(handler)
 
 async def handle_2fa(event, user_id, client):
     try:
