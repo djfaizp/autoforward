@@ -23,6 +23,10 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     @bot.on(events.NewMessage(pattern='/start'))
     async def start_command(event):
         user_id = event.sender_id
+        if not is_valid_user_id(user_id):
+            logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
+            return
+
         user_data = await db.get_user_credentials(user_id)
         if not user_data or not user_data.get('session_string'):
             await start_auth(event, user_id)
@@ -38,6 +42,10 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status)'))
     async def handle_auth(event):
         user_id = event.sender_id
+        if not is_valid_user_id(user_id):
+            logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
+            return
+
         user_data = await db.get_user_credentials(user_id)
         if user_data is None:
             logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
@@ -109,5 +117,9 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         except Exception as e:
             logger.error(f"Error in handle_retry_otp_command: {str(e)}")
             await event.reply(f"Error retrying OTP: {str(e)}")
+
+    def is_valid_user_id(user_id):
+        # Check if the user ID is a valid Telegram user ID (positive number)
+        return user_id > 0
 
     logger.info("Commands set up successfully")
