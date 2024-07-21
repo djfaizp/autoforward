@@ -85,6 +85,8 @@ async def handle_retry_otp(event):
     user_id = event.sender_id
     user_data = await db.get_user_credentials(user_id)
     if user_data.get('auth_state') == AuthState.VERIFY_OTP:
+        user_data['otp_attempts'] = 0
+        await db.save_user_credentials(user_id, user_data)
         await handle_phone_number_and_otp(event, user_id)
     else:
         await event.reply("Your current state does not allow resending OTP. Please complete the previous steps first.")
@@ -98,4 +100,3 @@ async def save_destination_channel(event, user_id):
     destination_channel = event.message.message
     await db.save_user_credentials(user_id, {'destination_channel': destination_channel, 'auth_state': AuthState.FINALIZE})
     await event.reply("Thank you! Your setup is complete. You can now use /start_forwarding to begin forwarding messages.")
-    
