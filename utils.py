@@ -23,7 +23,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     @bot.on(events.NewMessage(pattern='/start'))
     async def start_command(event):
         user_id = event.sender_id
-        if not is_valid_user_id(user_id):
+        if not db.is_valid_user_id(user_id):
             logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
             return
 
@@ -39,10 +39,10 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             )
         logger.info(f"User data for user {user_id}: {user_data}")
 
-    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status)'))
+    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/retry_otp)'))
     async def handle_auth(event):
         user_id = event.sender_id
-        if not is_valid_user_id(user_id):
+        if not db.is_valid_user_id(user_id):
             logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
             return
 
@@ -100,6 +100,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         /start_forwarding <start_id>-<end_id> - Start or resume the forwarding process
         /stop_forwarding - Stop the forwarding process
         /status - Check the status of the forwarding process
+        /retry_otp - Retry sending the OTP
         """
         await event.reply(
             help_text,
@@ -118,8 +119,5 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             logger.error(f"Error in handle_retry_otp_command: {str(e)}")
             await event.reply(f"Error retrying OTP: {str(e)}")
 
-    def is_valid_user_id(user_id):
-        # Check if the user ID is a valid Telegram user ID (positive number)
-        return user_id > 0
-
     logger.info("Commands set up successfully")
+    
