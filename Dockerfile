@@ -1,21 +1,45 @@
-# Build stage
-FROM python:3.10-slim as builder
+# Use an official Python runtime as a parent image
 
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
-
-# Final stage
 FROM python:3.10-slim
 
+
+
+# Set the working directory in the container
+
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-COPY . .
 
-# Make sure scripts in .local are usable:
-ENV PATH=/root/.local/bin:$PATH
+
+# Copy the requirements file into the container
+
+COPY requirements.txt .
+
+
+
+# Install any needed packages specified in requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+
+# Copy the rest of the working directory contents into the container
+
+COPY . ./app
+
+
+
+# Make port 80 available to the world outside this container
+
+EXPOSE 80
+
+
+
+# Define environment variable
+
+ENV NAME autoforwardbot
+
+
+
+# Run the bot when the container launches
 
 CMD ["python", "main.py"]
