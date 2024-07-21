@@ -52,63 +52,38 @@ class AuthManager:
         await db.save_user_credentials(user_id, {'api_hash': api_hash, 'auth_state': AuthState.REQUEST_PHONE_NUMBER})
         await event.reply("Thank you! Please provide your phone number (with country code).")
 
-    async def save_phone_number(self, event, user_id, user_data):
-        phone_number = event.message.message
+    async def handle_phone_number_and_otp(event, user_id):
+        user_data = await db.get_user_credentials(user_id)
+        phone_number = user_data.get('phone_number')
         api_id = user_data.get('api_id')
         api_hash = user_data.get('api_hash')
-
+    
+        if not phone_number or not api_id or not api_hash:
+            await event.reply("Missing credentials. Please start over with /start")
+            return
+    
         client = TelegramClient(StringSession(), api_id, api_hash)
         await client.connect()
-        self.clients[user_id] = client  # Store the client instance
-
+    
         try:
-            result = await client(SendCodeRequest(phone_number))
-            await db.save_user_credentials(user_id, {
-                'phone_number': phone_number,
-                'phone_code_hash': result.phone_code_hash,
-                'auth_state': AuthState.VERIFY_OTP
-            })
-            await event.reply("OTP sent to your phone number. Please provide the OTP.")
-        except PhoneNumberInvalidError:
-            await event.reply("The phone number is invalid. Please check and enter again.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-            await self.disconnect_client(user_id)
-        except Exception as e:
-            logger.error(f"Unexpected error in save_phone_number: {str(e)}", exc_info=True)
-            await event.reply("An error occurred. Please try again or contact support.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-            await self.disconnect_client(user_id)
-
-    async def verify_otp(self, event, user_id, user_data):
-        otp = event.message.message
-        phone_number = user_data.get('phone_number')
-        phone_code_hash = user_data.get('phone_code_hash')
-
-        client = self.clients.get(user_id)
-        if not client:
-            await event.reply("Session expired. Please start over with /start")
-            return
-
-        try:
-            await client.sign_in(phone_number, phone_code_hash, otp)
+            if not await client.is_user_authorized():
+                await client.send_code_request(phone_number)
+                await event.reply("Please enter the code you received:")
+                # Wait for the next message from the user to get the code
+                response = await client.wait_event(events.NewMessage(from_users=user_id))
+                code = response.message.text.strip()
+                await client.sign_in(phone_number, code)
+    
+            # If we reach here, the client is authenticated
             session_string = client.session.save()
-            await db.save_user_credentials(user_id, {'session_string': session_string, 'auth_state': AuthState.FINALIZE})
+            await db.save_user_credentials(user_id, {'session_string': session_string})
             await event.reply("Authentication successful! You can now use the bot's features.")
-        except PhoneCodeInvalidError:
-            await event.reply("The OTP is invalid. Please check and enter again.")
-        except PhoneCodeExpiredError:
-            await event.reply("The OTP has expired. Please request a new one by sending /retry_otp.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.SEND_OTP})
-        except SessionPasswordNeededError:
-            await event.reply("Two-factor authentication is enabled. Please disable it temporarily to use this bot.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
+    
         except Exception as e:
-            logger.error(f"Unexpected error in verify_otp: {str(e)}", exc_info=True)
-            await event.reply("An error occurred. Please try again or contact support.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.SEND_OTP})
+            logger.error(f"Error in handle_phone_number_and_otp: {str(e)}")
+            await event.reply(f"An error occurred: {str(e)}")
         finally:
-            await self.disconnect_client(user_id)
-
+            await client.disconnect()
     async def retry_otp(self, event, user_id):
         user_data = await db.get_user_credentials(user_id)
         phone_number = user_data.get('phone_number')
