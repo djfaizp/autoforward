@@ -54,7 +54,7 @@ class Database:
 
     async def save_user_credentials(self, user_id, credentials):
         try:
-            if not is_valid_user_id(user_id):
+            if not self.is_valid_user_id(user_id):
                 raise ValueError("Invalid user ID")
 
             user_id = int(user_id)
@@ -85,7 +85,7 @@ class Database:
 
     async def get_user_credentials(self, user_id):
         try:
-            if not is_valid_user_id(user_id):
+            if not self.is_valid_user_id(user_id):
                 raise ValueError("Invalid user ID")
 
             user_id = int(user_id)
@@ -183,3 +183,4 @@ class Database:
         return user_id > 0
 
 db = Database()
+            
