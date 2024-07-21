@@ -1,4 +1,3 @@
-# file: auth.py
 import logging
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PhoneNumberInvalidError, PhoneCodeInvalidError, PhoneCodeExpiredError
@@ -13,6 +12,7 @@ class AuthState:
     REQUEST_API_ID = 'REQUEST_API_ID'
     REQUEST_API_HASH = 'REQUEST_API_HASH'
     REQUEST_PHONE_NUMBER = 'REQUEST_PHONE_NUMBER'
+    SEND_OTP = 'SEND_OTP'
     VERIFY_OTP = 'VERIFY_OTP'
     FINALIZE = 'FINALIZE'
 
@@ -57,11 +57,11 @@ class AuthManager:
         api_id = user_data.get('api_id')
         api_hash = user_data.get('api_hash')
 
-        client = TelegramClient(StringSession(), api_id, api_hash)
-        await client.connect()
-        self.clients[user_id] = client  # Store the client instance
-
         try:
+            client = TelegramClient(StringSession(), api_id, api_hash, phone=phone_number)
+            await client.connect()
+            self.clients[user_id] = client  # Store the client instance
+
             result = await client(SendCodeRequest(phone_number))
             await db.save_user_credentials(user_id, {
                 'phone_number': phone_number,
@@ -72,12 +72,13 @@ class AuthManager:
         except PhoneNumberInvalidError:
             await event.reply("The phone number is invalid. Please check and enter again.")
             await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-            await self.disconnect_client(user_id)
         except Exception as e:
             logger.error(f"Unexpected error in save_phone_number: {str(e)}", exc_info=True)
             await event.reply("An error occurred. Please try again or contact support.")
             await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-            await self.disconnect_client(user_id)
+        finally:
+            if user_id not in self.clients:
+                await self.disconnect_client(user_id)
 
     async def verify_otp(self, event, user_id, user_data):
         otp = event.message.message
@@ -112,13 +113,14 @@ class AuthManager:
     async def retry_otp(self, event, user_id):
         user_data = await db.get_user_credentials(user_id)
         phone_number = user_data.get('phone_number')
-
-        client = self.clients.get(user_id)
-        if not client:
-            await event.reply("Session expired. Please start over with /start")
-            return
+        api_id = user_data.get('api_id')
+        api_hash = user_data.get('api_hash')
 
         try:
+            client = TelegramClient(StringSession(), api_id, api_hash, phone=phone_number)
+            await client.connect()
+            self.clients[user_id] = client
+
             result = await client(SendCodeRequest(phone_number))
             await db.save_user_credentials(user_id, {
                 'phone_code_hash': result.phone_code_hash,
@@ -151,4 +153,3 @@ def setup_auth_handlers(bot):
         await auth_manager.retry_otp(event, event.sender_id)
 
     logger.info("Authentication handlers set up successfully")
-    
