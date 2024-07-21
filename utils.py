@@ -60,8 +60,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
             await save_phone_number(event, user_id)
         elif auth_state == AuthState.VERIFY_OTP:
-            client = await send_otp(event, user_id)  # Get the client instance
-            await verify_otp(event, user_id, client)
+            await verify_otp(event, user_id)
         elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
             await save_source_channel(event, user_id)
         elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
