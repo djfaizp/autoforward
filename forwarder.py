@@ -46,8 +46,8 @@ class Forwarder:
         flood_wait_time = 1
 
         try:
-            source_channel = await self.validate_channel(user_data['source'])
-            destination_channel = await self.validate_channel(user_data['destination'])
+            source_channel = await self.validate_channel(user_data['source_channel'])
+            destination_channel = await self.validate_channel(user_data['destination_channel'])
         except ValueError:
             await bot.edit_message(user_id, progress_message.id, "Error: Invalid source or destination channel.")
             await self.save_user_credentials(user_id, {'forwarding': False})
@@ -111,7 +111,7 @@ class Forwarder:
             if messages_forwarded % 1000 == 0:
                 long_pause = random.randint(800, 1200)
                 logger.info(f"Taking a longer pause of {long_pause} seconds after forwarding 1000 messages.")
-                await bot.send_message(user_id, f"Taking a {long_pause // 30}-minute break to avoid rate limits. The forwarding will resume automatically.")
+                await bot.send_message(user_id, f"Taking a {long_pause // 60}-minute break to avoid rate limits. The forwarding will resume automatically.")
                 await asyncio.sleep(long_pause)
 
             user_data = await self.get_user_credentials(user_id)
@@ -227,7 +227,7 @@ class Forwarder:
             return
 
         missing_credentials = []
-        for cred in ['api_id', 'api_hash', 'source', 'destination']:
+        for cred in ['api_id', 'api_hash', 'source_channel', 'destination_channel']:
             if cred not in user_data:
                 missing_credentials.append(cred.replace('_', ' ').title())
 
@@ -245,19 +245,25 @@ class Forwarder:
                 await event.reply("Failed to start user client. Please check your API ID and API Hash.")
                 return
 
-        await self.save_user_credentials(user_id, {
-            'forwarding': True,
-            'messages_forwarded': 0,
-            'start_id': start_id,
-            'end_id': end_id,
-            'current_id': start_id
-        })
+        # Check if forwarding is already in progress and resume if so
+        if user_data.get('forwarding'):
+            logger.info(f"Resuming forwarding for user {user_id}")
+            progress_message = await event.reply("Resuming forwarding process...")
+            await self.process_user_queue(user_id, bot, db, progress_message)
+        else:
+            await self.save_user_credentials(user_id, {
+                'forwarding': True,
+                'messages_forwarded': 0,
+                'start_id': start_id,
+                'end_id': end_id,
+                'current_id': start_id
+            })
 
-        logger.info(f"User {user_id} started forwarding process from message ID {start_id} to {end_id}")
-        progress_message = await event.reply(f"Forwarding process started from message ID {start_id} to {end_id}. Use /status to check the progress.")
+            logger.info(f"User {user_id} started forwarding process from message ID {start_id} to {end_id}")
+            progress_message = await event.reply(f"Forwarding process started from message ID {start_id} to {end_id}. Use /status to check the progress.")
 
-        self.queue.append((user_id, bot, db, progress_message, start_id, end_id))
-        logger.info(f"User {user_id} added to the forwarding queue with range {start_id}-{end_id}")
+            self.queue.append((user_id, bot, db, progress_message, start_id, end_id))
+            logger.info(f"User {user_id} added to the forwarding queue with range {start_id}-{end_id}")
 
     async def stop_forwarding(self, event, db):
         user_id = event.sender_id
@@ -311,4 +317,4 @@ class Forwarder:
             if user_id in self.forwarding_tasks:
                 del self.forwarding_tasks[user_id]
         logger.info(f"Completed processing queue for user {user_id}")
-        
+            
