@@ -37,6 +37,7 @@ async def handle_phone_number_and_otp(event, user_id):
     api_id = user_data.get('api_id')
     api_hash = user_data.get('api_hash')
     auth_state = user_data.get('auth_state')
+    otp_attempts = user_data.get('otp_attempts', 0)
 
     async with TelegramClient(StringSession(), api_id, api_hash) as client:
         if auth_state == AuthState.REQUEST_PHONE_NUMBER:
@@ -46,7 +47,8 @@ async def handle_phone_number_and_otp(event, user_id):
                 await db.save_user_credentials(user_id, {
                     'phone_number': phone_number,
                     'phone_code_hash': result.phone_code_hash,
-                    'auth_state': AuthState.VERIFY_OTP
+                    'auth_state': AuthState.VERIFY_OTP,
+                    'otp_attempts': 0  # Reset OTP attempts
                 })
                 await event.reply("OTP sent to your phone number. Please provide the OTP.")
             except PhoneNumberInvalidError:
@@ -54,6 +56,10 @@ async def handle_phone_number_and_otp(event, user_id):
             except Exception as e:
                 logger.error(f"Unexpected error in handle_phone_number: {str(e)}", exc_info=True)
         elif auth_state == AuthState.VERIFY_OTP:
+            if otp_attempts >= 3:
+                await event.reply("You have exceeded the maximum number of attempts. Please request a new OTP by sending /retry_otp.")
+                return
+
             otp = event.message.message
             phone_number = user_data.get('phone_number')
             phone_code_hash = user_data.get('phone_code_hash')
@@ -62,37 +68,24 @@ async def handle_phone_number_and_otp(event, user_id):
                 session_string = client.session.save()
                 await db.save_user_credentials(user_id, {
                     'session_string': session_string,
-                    'auth_state': AuthState.REQUEST_SOURCE_CHANNEL
+                    'auth_state': AuthState.REQUEST_SOURCE_CHANNEL,
+                    'otp_attempts': 0  # Reset OTP attempts after successful login
                 })
                 await event.reply("You are authenticated! Please provide the source channel ID.")
             except PhoneCodeInvalidError:
-                await event.reply("The OTP is invalid. Please check and enter again.")
+                otp_attempts += 1
+                await db.save_user_credentials(user_id, {'otp_attempts': otp_attempts})
+                await event.reply(f"The OTP is invalid. You have {3 - otp_attempts} attempt(s) left. Please check and enter again.")
             except PhoneCodeExpiredError:
                 await event.reply("The OTP has expired. Please request a new one by sending /retry_otp.")
             except Exception as e:
                 logger.error(f"Unexpected error in handle_otp: {str(e)}", exc_info=True)
 
-async def send_otp(event, user_id):
-    user_data = await db.get_user_credentials(user_id)
-    phone_number = user_data.get('phone_number')
-    api_id = user_data.get('api_id')
-    api_hash = user_data.get('api_hash')
-
-    async with TelegramClient(StringSession(), api_id, api_hash) as client:
-        try:
-            result = await client(SendCodeRequest(phone_number))
-            await db.save_user_credentials(user_id, {'phone_code_hash': result.phone_code_hash, 'auth_state': AuthState.VERIFY_OTP})
-            await event.reply("OTP sent to your phone number. Please provide the OTP.")
-        except PhoneNumberInvalidError:
-            await event.reply("The phone number is invalid. Please check and enter again.")
-        except Exception as e:
-            logger.error(f"Unexpected error in send_otp: {str(e)}", exc_info=True)
-
 async def handle_retry_otp(event):
     user_id = event.sender_id
     user_data = await db.get_user_credentials(user_id)
     if user_data.get('auth_state') == AuthState.VERIFY_OTP:
-        await send_otp(event, user_id)
+        await handle_phone_number_and_otp(event, user_id)
     else:
         await event.reply("Your current state does not allow resending OTP. Please complete the previous steps first.")
 
@@ -105,3 +98,4 @@ async def save_destination_channel(event, user_id):
     destination_channel = event.message.message
     await db.save_user_credentials(user_id, {'destination_channel': destination_channel, 'auth_state': AuthState.FINALIZE})
     await event.reply("Thank you! Your setup is complete. You can now use /start_forwarding to begin forwarding messages.")
+    
