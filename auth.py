@@ -51,7 +51,6 @@ async def save_phone_number(event, user_id):
     if not re.match(r'^\+\d{10,14}$', phone_number):
         await event.reply("Invalid phone number format. Please enter the number with country code (e.g., +1234567890).")
         return
-
     await db.save_user_credentials(user_id, {'phone_number': phone_number, 'auth_state': AuthState.OTP_SENT})
     await authenticate_user(event, user_id)
 
@@ -61,13 +60,23 @@ async def authenticate_user(event, user_id):
     
     await client.connect()
     try:
-        await client.send_code_request(user_data['phone_number'])
+        send_code_result = await client(SendCodeRequest(
+            phone=user_data['phone_number'],
+            api_id=user_data['api_id'],
+            api_hash=user_data['api_hash']
+        ))
+        phone_code_hash = send_code_result.phone_code_hash
+        await db.save_user_credentials(user_id, {'phone_code_hash': phone_code_hash})
         await event.reply("OTP sent. Please enter the code:")
         
         for _ in range(3):  # Allow 3 attempts
             try:
                 otp = await wait_for_otp(event)
-                await client.sign_in(user_data['phone_number'], otp)
+                await client.sign_in(
+                    phone=user_data['phone_number'],
+                    code=otp,
+                    phone_code_hash=phone_code_hash
+                )
                 session_string = client.session.save()
                 await db.save_user_credentials(user_id, {'session_string': session_string, 'auth_state': AuthState.REQUEST_SOURCE_CHANNEL})
                 await event.reply("Authentication successful! Please provide the source channel ID.")
