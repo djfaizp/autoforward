@@ -13,7 +13,8 @@ services:
       - BOT_TOKEN=${BOT_TOKEN}
     depends_on:
       - mongo
-
+    volumes:
+      - ./bot_data:/app  # Mount the local directory to the container
   mongo:
     image: mongo:4.4
     container_name: mongo
