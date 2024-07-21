@@ -10,14 +10,5 @@ COPY requirements.txt .
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the working directory contents into the container
-COPY bot_data/ .
-
-# Make port 80 available to the world outside this container
-EXPOSE 80
-
-# Define environment variable
-ENV NAME Bot
-
 # Run the bot when the container launches
 CMD ["python", "main.py"]
