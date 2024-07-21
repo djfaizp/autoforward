@@ -1,7 +1,6 @@
 # file: auth.py
 import logging
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.auth import SendCodeRequest, SignInRequest
 from telethon.sessions import StringSession
 from telethon.errors.rpcerrorlist import PhoneNumberInvalidError, PhoneCodeInvalidError, PhoneCodeExpiredError
@@ -39,47 +38,54 @@ async def handle_phone_number_and_otp(event, user_id):
     auth_state = user_data.get('auth_state')
     otp_attempts = user_data.get('otp_attempts', 0)
 
-    async with TelegramClient(StringSession(), api_id, api_hash) as client:
-        if auth_state == AuthState.REQUEST_PHONE_NUMBER:
-            phone_number = event.message.message
-            try:
-                result = await client(SendCodeRequest(phone_number))
-                await db.save_user_credentials(user_id, {
-                    'phone_number': phone_number,
-                    'phone_code_hash': result.phone_code_hash,
-                    'auth_state': AuthState.VERIFY_OTP,
-                    'otp_attempts': 0  # Reset OTP attempts
-                })
-                await event.reply("OTP sent to your phone number. Please provide the OTP.")
-            except PhoneNumberInvalidError:
-                await event.reply("The phone number is invalid. Please check and enter again.")
-            except Exception as e:
-                logger.error(f"Unexpected error in handle_phone_number: {str(e)}", exc_info=True)
-        elif auth_state == AuthState.VERIFY_OTP:
-            if otp_attempts >= 3:
-                await event.reply("You have exceeded the maximum number of attempts. Please request a new OTP by sending /retry_otp.")
-                return
+    if auth_state == AuthState.REQUEST_PHONE_NUMBER:
+        phone_number = event.message.message
+        client = TelegramClient(StringSession(), api_id, api_hash)
+        await client.connect()
+        try:
+            result = await client(SendCodeRequest(phone_number))
+            await db.save_user_credentials(user_id, {
+                'phone_number': phone_number,
+                'phone_code_hash': result.phone_code_hash,
+                'auth_state': AuthState.VERIFY_OTP,
+                'otp_attempts': 0  # Reset OTP attempts
+            })
+            await event.reply("OTP sent to your phone number. Please provide the OTP.")
+        except PhoneNumberInvalidError:
+            await event.reply("The phone number is invalid. Please check and enter again.")
+        except Exception as e:
+            logger.error(f"Unexpected error in handle_phone_number: {str(e)}", exc_info=True)
+        finally:
+            await client.disconnect()
+    elif auth_state == AuthState.VERIFY_OTP:
+        if otp_attempts >= 3:
+            await event.reply("You have exceeded the maximum number of attempts. Please request a new OTP by sending /retry_otp.")
+            return
 
-            otp = event.message.message
-            phone_number = user_data.get('phone_number')
-            phone_code_hash = user_data.get('phone_code_hash')
-            try:
-                await client(SignInRequest(phone_number, phone_code_hash, otp))
-                session_string = client.session.save()
-                await db.save_user_credentials(user_id, {
-                    'session_string': session_string,
-                    'auth_state': AuthState.REQUEST_SOURCE_CHANNEL,
-                    'otp_attempts': 0  # Reset OTP attempts after successful login
-                })
-                await event.reply("You are authenticated! Please provide the source channel ID.")
-            except PhoneCodeInvalidError:
-                otp_attempts += 1
-                await db.save_user_credentials(user_id, {'otp_attempts': otp_attempts})
-                await event.reply(f"The OTP is invalid. You have {3 - otp_attempts} attempt(s) left. Please check and enter again.")
-            except PhoneCodeExpiredError:
-                await event.reply("The OTP has expired. Please request a new one by sending /retry_otp.")
-            except Exception as e:
-                logger.error(f"Unexpected error in handle_otp: {str(e)}", exc_info=True)
+        otp = event.message.message
+        phone_number = user_data.get('phone_number')
+        phone_code_hash = user_data.get('phone_code_hash')
+        client = TelegramClient(StringSession(), api_id, api_hash)
+        await client.connect()
+        try:
+            await client(SignInRequest(phone_number, phone_code_hash, otp))
+            session_string = client.session.save()
+            await db.save_user_credentials(user_id, {
+                'session_string': session_string,
+                'auth_state': AuthState.REQUEST_SOURCE_CHANNEL,
+                'otp_attempts': 0  # Reset OTP attempts after successful login
+            })
+            await event.reply("You are authenticated! Please provide the source channel ID.")
+        except PhoneCodeInvalidError:
+            otp_attempts += 1
+            await db.save_user_credentials(user_id, {'otp_attempts': otp_attempts})
+            await event.reply(f"The OTP is invalid. You have {3 - otp_attempts} attempt(s) left. Please check and enter again.")
+        except PhoneCodeExpiredError:
+            await event.reply("The OTP has expired. Please request a new one by sending /retry_otp.")
+        except Exception as e:
+            logger.error(f"Unexpected error in handle_otp: {str(e)}", exc_info=True)
+        finally:
+            await client.disconnect()
 
 async def handle_retry_otp(event):
     user_id = event.sender_id
