@@ -3,10 +3,25 @@ version: '3.8'
 services:
   bot:
     build: .
+    container_name: autoforwardbot
     restart: always
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
+      - MONGODB_URI=mongodb://mongo:27017/Cluster0
+      - DB_NAME=Cluster0
       - API_ID=${API_ID}
       - API_HASH=${API_HASH}
-      - MONGODB_URI=${MONGODB_URI}
-      - DB_NAME=${DB_NAME}
+      - BOT_TOKEN=${BOT_TOKEN}
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:4.4
+    container_name: mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
