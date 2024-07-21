@@ -61,7 +61,7 @@ async def authenticate_user(event, user_id):
     await client.connect()
     try:
         send_code_result = await client(SendCodeRequest(
-            phone=user_data['phone_number'],
+            phone_number=user_data['phone_number'],
             api_id=user_data['api_id'],
             api_hash=user_data['api_hash']
         ))
