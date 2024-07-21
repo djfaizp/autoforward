@@ -72,7 +72,7 @@ class Database:
                 {'$set': credentials},
                 upsert=True
             )
-            logger.info(f"Saved credentials for user {user_id}")
+            logger.info(f"Saved credentials for user {user_id}: {credentials}")
         except ValueError as e:
             logger.error(f"Invalid value in credentials for user {user_id}: {str(e)}")
             raise
@@ -96,6 +96,7 @@ class Database:
                     user_data['current_id'] = int(user_data['current_id'])
                 if 'messages_forwarded' in user_data:
                     user_data['messages_forwarded'] = int(user_data['messages_forwarded'])
+                logger.info(f"Retrieved user credentials for user {user_id}: {user_data}")
                 return user_data
             else:
                 logger.warning(f"No user data found for user ID {user_id}")
