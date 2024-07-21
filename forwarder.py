@@ -210,6 +210,10 @@ class Forwarder:
 
     async def start_forwarding(self, event, bot, db):
         user_id = event.sender_id
+        if not self.db.is_valid_user_id(user_id):
+            logger.info(f"Invalid user ID {user_id}. Skipping start_forwarding.")
+            return
+
         try:
             _, range_ids = event.text.split()
             start_id, end_id = map(int, range_ids.split('-'))
@@ -267,6 +271,10 @@ class Forwarder:
 
     async def stop_forwarding(self, event, db):
         user_id = event.sender_id
+        if not self.db.is_valid_user_id(user_id):
+            logger.info(f"Invalid user ID {user_id}. Skipping stop_forwarding.")
+            return
+
         try:
             await self.save_user_credentials(user_id, {'forwarding': False})
             logger.info(f"User {user_id} requested to stop forwarding process")
@@ -281,6 +289,10 @@ class Forwarder:
 
     async def status(self, event, db):
         user_id = event.sender_id
+        if not self.db.is_valid_user_id(user_id):
+            logger.info(f"Invalid user ID {user_id}. Skipping status.")
+            return
+
         user_data = await self.get_user_credentials(user_id)
         if user_data and user_data.get('forwarding'):
             messages_forwarded = user_data.get('messages_forwarded', 0)
