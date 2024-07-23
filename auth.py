@@ -24,6 +24,9 @@ class AuthState(Enum):
 user_locks = {}
 
 async def start_auth(event, user_id):
+    if user_id not in user_locks:
+        user_locks[user_id] = asyncio.Lock()
+
     async with user_locks[user_id]:
         await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
     await event.reply("Welcome! Let's start the authentication process. Please enter your API ID:")
