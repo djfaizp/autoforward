@@ -39,7 +39,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         user_id = event.sender_id
         user_data = await db.get_user_credentials(user_id)
 
-        if not user_data or not user_data.get('session_string')):
+        if not user_data or not user_data.get('session_string'):
             await event.reply("You are not authenticated. Please start with /start")
             return
 
