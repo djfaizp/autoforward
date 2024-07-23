@@ -68,7 +68,7 @@ async def authenticate_user(event, user_id):
     
     try:
         await client.sign_in(
-            phone=user_data['phone_number'],
+            phone_number=user_data['phone_number'],
             code=otp,
             phone_code_hash=user_data.get('phone_code_hash')
         )
