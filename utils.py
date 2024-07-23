@@ -31,7 +31,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         logger.info(f"User data for user {user_id}: {user_data}")
 
     @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/retry_otp)'))
-    async def handle_auth(event):
+    async def handle_auth_message(event):
         await auth_handler(event)
 
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
@@ -115,4 +115,3 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         return user_id > 0
 
     logger.info("Commands set up successfully")
-    
