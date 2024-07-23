@@ -1,9 +1,9 @@
-# file: auth.py
 import os
+import asyncio
 import logging
 from enum import Enum
-from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError
+from telethon import TelegramClient, functions, types
+from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
 from database import db
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,12 @@ class AuthState(Enum):
     REQUEST_DESTINATION_CHANNEL = 8
     COMPLETED = 9
 
+# A lock to manage concurrent access to a user's auth state
+user_locks = {}
+
 async def start_auth(event, user_id):
-    await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
+    async with user_locks[user_id]:
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
     await event.reply("Welcome! Let's start the authentication process. Please enter your API ID:")
 
 async def save_api_id(event, user_id):
@@ -30,19 +34,22 @@ async def save_api_id(event, user_id):
         await event.reply("Invalid API ID. Please enter a valid numeric API ID:")
         return
 
-    await db.save_user_credential(user_id, 'api_id', int(api_id))
-    await db.set_user_auth_state(user_id, AuthState.REQUEST_API_HASH.value)
+    async with user_locks[user_id]:
+        await db.save_user_credential(user_id, 'api_id', int(api_id))
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_API_HASH.value)
     await event.reply("Great! Now, please enter your API Hash:")
 
 async def save_api_hash(event, user_id):
     api_hash = event.message.text.strip()
-    await db.save_user_credential(user_id, 'api_hash', api_hash)
-    await db.set_user_auth_state(user_id, AuthState.REQUEST_PHONE_NUMBER.value)
+    async with user_locks[user_id]:
+        await db.save_user_credential(user_id, 'api_hash', api_hash)
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_PHONE_NUMBER.value)
     await event.reply("Excellent! Now, please enter your phone number (including country code):")
 
 async def save_phone_number(event, user_id):
     phone_number = event.message.text.strip()
-    await db.save_user_credential(user_id, 'phone_number', phone_number)
+    async with user_locks[user_id]:
+        await db.save_user_credential(user_id, 'phone_number', phone_number)
     await send_code_request(event, user_id)
 
 async def send_code_request(event, user_id):
@@ -52,15 +59,11 @@ async def send_code_request(event, user_id):
     client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
     try:
-        if 'phone_code_hash' in user_data and user_data['phone_code_hash']:
-            logger.info(f"Reusing existing phone_code_hash for user {user_id}: {user_data['phone_code_hash']}")
-            await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
-            await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
-        else:
-            send_result = await client.send_code_request(user_data['phone_number'])
+        send_result = await asyncio.wait_for(client.send_code_request(user_data['phone_number']), timeout=30)
+        async with user_locks[user_id]:
             await db.save_user_credential(user_id, 'phone_code_hash', send_result.phone_code_hash)
             await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
-            await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
+        await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
     except Exception as e:
         logger.error(f"Error sending code request: {str(e)}")
         await event.reply(f"Error sending OTP: {str(e)}. Please try again or start over with /start")
@@ -78,25 +81,32 @@ async def authenticate_user(event, user_id):
     
     try:
         logger.info(f"Authenticating user {user_id} with phone_code_hash: {user_data['phone_code_hash']}")
-        await client.sign_in(
+        await asyncio.wait_for(client.sign_in(
             phone=user_data['phone_number'],
             code=otp,
             phone_code_hash=user_data['phone_code_hash']
-        )
+        ), timeout=30)
         session_string = client.session.save()
-        await db.save_user_credential(user_id, 'session_string', session_string)
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
+        async with user_locks[user_id]:
+            await db.save_user_credential(user_id, 'session_string', session_string)
+            await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
         await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
     except PhoneCodeExpiredError:
         logger.error("The confirmation code has expired.")
-        await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
+        async with user_locks[user_id]:
+            await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
         await event.reply("The confirmation code has expired. Please use /retry_otp to request a new OTP.")
+    except PhoneCodeInvalidError:
+        logger.error("Invalid OTP entered.")
+        await event.reply("The OTP entered is invalid. Please try again.")
     except SessionPasswordNeededError:
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
+        async with user_locks[user_id]:
+            await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
         await event.reply("Two-factor authentication is enabled. Please enter your 2FA password:")
     except Exception as e:
         logger.error(f"Error during authentication: {str(e)}")
-        await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
+        async with user_locks[user_id]:
+            await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
         await event.reply(f"Authentication failed: {str(e)}. Please try again or use /retry_otp to request a new OTP.")
     finally:
         await client.disconnect()
@@ -111,10 +121,11 @@ async def handle_2fa_password(event, user_id):
     await client.connect()
     
     try:
-        await client.sign_in(password=password)
+        await asyncio.wait_for(client.sign_in(password=password), timeout=30)
         session_string = client.session.save()
-        await db.save_user_credential(user_id, 'session_string', session_string)
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
+        async with user_locks[user_id]:
+            await db.save_user_credential(user_id, 'session_string', session_string)
+            await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
         await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
     except Exception as e:
         logger.error(f"Error during 2FA authentication: {str(e)}")
@@ -124,47 +135,52 @@ async def handle_2fa_password(event, user_id):
 
 async def save_source_channel(event, user_id):
     source_channel = event.message.text.strip()
-    await db.save_user_credential(user_id, 'source_channel', source_channel)
-    await db.set_user_auth_state(user_id, AuthState.REQUEST_DESTINATION_CHANNEL.value)
+    async with user_locks[user_id]:
+        await db.save_user_credential(user_id, 'source_channel', source_channel)
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_DESTINATION_CHANNEL.value)
     await event.reply("Source channel saved. Now, please enter the destination channel username or ID:")
 
 async def save_destination_channel(event, user_id):
     destination_channel = event.message.text.strip()
-    await db.save_user_credential(user_id, 'destination_channel', destination_channel)
-    await db.set_user_auth_state(user_id, AuthState.COMPLETED.value)
+    async with user_locks[user_id]:
+        await db.save_user_credential(user_id, 'destination_channel', destination_channel)
+        await db.set_user_auth_state(user_id, AuthState.COMPLETED.value)
     await event.reply("Destination channel saved. Authentication process completed. You can now use /start_forwarding to begin forwarding messages.")
 
 async def handle_retry_otp(event, user_id):
-    user_data = await db.get_user_credentials(user_id)
-    if user_data.get('phone_code_hash'):
-        # Reuse the existing phone_code_hash for retry
-        await send_code_request(event, user_id)
-    else:
-        await event.reply("No OTP sent previously. Please start the authentication process with /start.")
+    async with user_locks[user_id]:
+        user_data = await db.get_user_credentials(user_id)
+        # Reset phone_code_hash to trigger new code request
+        await db.save_user_credential(user_id, 'phone_code_hash', None)
+    await send_code_request(event, user_id)
 
 async def handle_auth(event):
     user_id = event.sender_id
-    user_data = await db.get_user_credentials(user_id)
-    if user_data is None:
-        logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
-        return  # Skip processing if no user data is found
+    if user_id not in user_locks:
+        user_locks[user_id] = asyncio.Lock()
 
-    auth_state = AuthState(user_data.get('auth_state', 0))
+    async with user_locks[user_id]:
+        user_data = await db.get_user_credentials(user_id)
+        if user_data is None:
+            logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
+            return  # Skip processing if no user data is found
 
-    if auth_state == AuthState.REQUEST_API_ID:
-        await save_api_id(event, user_id)
-    elif auth_state == AuthState.REQUEST_API_HASH:
-        await save_api_hash(event, user_id)
-    elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
-        await save_phone_number(event, user_id)
-    elif auth_state in [AuthState.OTP_SENT, AuthState.VERIFY_OTP]:
-        await authenticate_user(event, user_id)
-    elif auth_state == AuthState.REQUEST_2FA_PASSWORD:
-        await handle_2fa_password(event, user_id)
-    elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
-        await save_source_channel(event, user_id)
-    elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
-        await save_destination_channel(event, user_id)
-    else:
-        await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
-        
+        auth_state = AuthState(user_data.get('auth_state', 0))
+
+        if auth_state == AuthState.REQUEST_API_ID:
+            await save_api_id(event, user_id)
+        elif auth_state == AuthState.REQUEST_API_HASH:
+            await save_api_hash(event, user_id)
+        elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
+            await save_phone_number(event, user_id)
+        elif auth_state in [AuthState.OTP_SENT, AuthState.VERIFY_OTP]:
+            await authenticate_user(event, user_id)
+        elif auth_state == AuthState.REQUEST_2FA_PASSWORD:
+            await handle_2fa_password(event, user_id)
+        elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
+            await save_source_channel(event, user_id)
+        elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
+            await save_destination_channel(event, user_id)
+        else:
+            await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
+            
