@@ -1,8 +1,9 @@
 # file: auth.py
+import os
 import logging
 from enum import Enum
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError
 from database import db
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,9 @@ async def save_phone_number(event, user_id):
 
 async def send_code_request(event, user_id):
     user_data = await db.get_user_credentials(user_id)
-    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    session_dir = f"sessions/{user_id}"
+    os.makedirs(session_dir, exist_ok=True)
+    client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
     try:
         send_result = await client.send_code_request(user_data['phone_number'])
@@ -63,19 +66,25 @@ async def authenticate_user(event, user_id):
     otp = event.message.text.strip()
     user_data = await db.get_user_credentials(user_id)
     
-    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    session_dir = f"sessions/{user_id}"
+    os.makedirs(session_dir, exist_ok=True)
+    client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
     
     try:
         await client.sign_in(
             phone=user_data['phone_number'],
             code=otp,
-            phone_code_hash=user_data.get('phone_code_hash')
+            phone_code_hash=user_data['phone_code_hash']
         )
         session_string = client.session.save()
         await db.save_user_credential(user_id, 'session_string', session_string)
         await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
         await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
+    except PhoneCodeExpiredError:
+        logger.error("The confirmation code has expired.")
+        await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
+        await event.reply("The confirmation code has expired. Please use /retry_otp to request a new OTP.")
     except SessionPasswordNeededError:
         await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
         await event.reply("Two-factor authentication is enabled. Please enter your 2FA password:")
@@ -90,7 +99,9 @@ async def handle_2fa_password(event, user_id):
     password = event.message.text.strip()
     user_data = await db.get_user_credentials(user_id)
     
-    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    session_dir = f"sessions/{user_id}"
+    os.makedirs(session_dir, exist_ok=True)
+    client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
     
     try:
@@ -145,3 +156,4 @@ async def handle_auth(event):
         await save_destination_channel(event, user_id)
     else:
         await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
+        
