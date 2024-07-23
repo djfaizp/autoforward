@@ -1,7 +1,7 @@
 # file: database.py
 import os
-from motor.motor_asyncio import AsyncIOMotorClient
 import logging
+from motor.motor_asyncio import AsyncIOMotorClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,12 @@ class Database:
             db_name = os.getenv('DB_NAME', 'Cluster0')
             if not mongodb_uri:
                 raise ValueError("MONGODB_URI environment variable is not set")
-            self.client = AsyncIOMotorClient(mongodb_uri)
+
+            self.client = AsyncIOMotorClient(
+                mongodb_uri,
+                tls=True,
+                tlsAllowInvalidCertificates=True  # Use with caution
+            )
             self.db = self.client[db_name]
             logger.info(f"Connected to MongoDB database: {db_name}")
             await self.ensure_indexes()
@@ -31,19 +36,16 @@ class Database:
 
     async def ensure_indexes(self):
         try:
-            # Ensure indexes for users collection
             user_indexes = await self.db.users.index_information()
             if 'user_id_1' not in user_indexes:
                 await self.db.users.create_index('user_id', unique=True)
                 logger.info("Created index for user_id in users collection")
             
-            # Ensure indexes for forwarded_messages collection
             forwarded_messages_indexes = await self.db.forwarded_messages.index_information()
             if 'user_id_1_message_id_1' not in forwarded_messages_indexes:
                 await self.db.forwarded_messages.create_index([('user_id', 1), ('message_id', 1)], unique=True)
                 logger.info("Created composite index for user_id and message_id in forwarded_messages collection")
 
-            # Ensure indexes for forwarded_filenames collection
             forwarded_filenames_indexes = await self.db.forwarded_filenames.index_information()
             if 'user_id_1_filename_1' not in forwarded_filenames_indexes:
                 await self.db.forwarded_filenames.create_index([('user_id', 1), ('filename', 1)], unique=True)
@@ -220,4 +222,3 @@ class Database:
         return user_id > 0
 
 db = Database()
-                                  
