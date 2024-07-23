@@ -115,3 +115,4 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         return user_id > 0
 
     logger.info("Commands set up successfully")
+    
