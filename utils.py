@@ -49,7 +49,7 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
             return  # Skip processing if no user data is found
 
         auth_state = user_data.get('auth_state')
-        
+
         if auth_state == AuthState.REQUEST_API_ID:
             await save_api_id(event, user_id)
         elif auth_state == AuthState.REQUEST_API_HASH:
@@ -67,24 +67,48 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
 
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
     async def start_forwarding_command(event):
+        user_id = event.sender_id
+        user_data = await db.get_user_credentials(user_id)
+
+        if not user_data or not user_data.get('session_string'):
+            await event.reply("You are not authenticated. Please start with /start")
+            return
+
         try:
             await forwarder.start_forwarding(event, bot, db)
+            await event.reply("Message forwarding started.")
         except Exception as e:
             logger.error(f"Error in start_forwarding_command: {str(e)}")
             await event.reply(f"Error starting forwarding: {str(e)}")
 
     @bot.on(events.NewMessage(pattern='/stop_forwarding'))
     async def stop_forwarding_command(event):
+        user_id = event.sender_id
+        user_data = await db.get_user_credentials(user_id)
+
+        if not user_data or not user_data.get('session_string'):
+            await event.reply("You are not authenticated. Please start with /start")
+            return
+
         try:
             await forwarder.stop_forwarding(event, db)
+            await event.reply("Message forwarding stopped.")
         except Exception as e:
             logger.error(f"Error in stop_forwarding_command: {str(e)}")
             await event.reply(f"Error stopping forwarding: {str(e)}")
 
     @bot.on(events.NewMessage(pattern='/status'))
     async def status_command(event):
+        user_id = event.sender_id
+        user_data = await db.get_user_credentials(user_id)
+
+        if not user_data or not user_data.get('session_string'):
+            await event.reply("You are not authenticated. Please start with /start")
+            return
+
         try:
-            await forwarder.status(event, db)
+            status = await forwarder.status(event, db)
+            await event.reply(f"Forwarding status: {status}")
         except Exception as e:
             logger.error(f"Error in status_command: {str(e)}")
             await event.reply(f"Error retrieving status: {str(e)}")
@@ -122,3 +146,4 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         return user_id > 0
 
     logger.info("Commands set up successfully")
+
