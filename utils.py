@@ -1,5 +1,4 @@
 # file: utils.py
-
 import logging
 from telethon import events, Button
 from auth import (
@@ -14,17 +13,14 @@ from forwarder import Forwarder
 logger = logging.getLogger(__name__)
 
 def setup_commands(bot, user_client, forwarder: Forwarder):
-
     @bot.on(events.NewMessage(pattern='/start'))
     async def start_command(event):
         user_id = event.sender_id
-
         if not is_valid_user_id(user_id):
             logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
             return
 
         user_data = await db.get_user_credentials(user_id)
-
         if not user_data or not user_data.get('session_string'):
             await start_auth(event, user_id)
         else:
@@ -32,7 +28,6 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
                 "Welcome back! You are already authenticated. Use /help to see available commands.",
                 buttons=[Button.inline("Help", b'help')]
             )
-
         logger.info(f"User data for user {user_id}: {user_data}")
 
     @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/retry_otp)'))
@@ -110,17 +105,13 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
     @bot.on(events.NewMessage(pattern='/retry_otp'))
     async def retry_otp_command(event):
         try:
-            user_id = event.sender_id
-            user_data = await db.get_user_credentials(user_id)
-            if user_data and user_data.get('auth_state') in [AuthState.OTP_SENT.value, AuthState.VERIFY_OTP.value]:
-                await handle_retry_otp(event, user_id)
-            else:
-                await event.reply("You're not at the OTP verification stage. Please start the authentication process with /start.")
+            await handle_retry_otp(event, event.sender_id)
         except Exception as e:
             logger.error(f"Error in retry_otp_command: {str(e)}")
             await event.reply(f"Error retrying OTP: {str(e)}")
 
     def is_valid_user_id(user_id):
+        # Check if the user ID is a valid Telegram user ID (positive number)
         return user_id > 0
 
     logger.info("Commands set up successfully")
