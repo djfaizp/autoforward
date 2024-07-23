@@ -68,7 +68,7 @@ async def authenticate_user(event, user_id):
     
     try:
         await client.sign_in(
-            phone_number=user_data['phone_number'],
+            phone=user_data['phone_number'],
             code=otp,
             phone_code_hash=user_data.get('phone_code_hash')
         )
@@ -104,7 +104,6 @@ async def handle_2fa_password(event, user_id):
         await event.reply(f"2FA authentication failed: {str(e)}. Please try again.")
     finally:
         await client.disconnect()
-
 async def save_source_channel(event, user_id):
     source_channel = event.message.text.strip()
     await db.save_user_credential(user_id, 'source_channel', source_channel)
