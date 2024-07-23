@@ -104,6 +104,7 @@ async def handle_2fa_password(event, user_id):
         await event.reply(f"2FA authentication failed: {str(e)}. Please try again.")
     finally:
         await client.disconnect()
+
 async def save_source_channel(event, user_id):
     source_channel = event.message.text.strip()
     await db.save_user_credential(user_id, 'source_channel', source_channel)
@@ -144,4 +145,3 @@ async def handle_auth(event):
         await save_destination_channel(event, user_id)
     else:
         await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
-        
