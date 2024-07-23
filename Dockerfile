@@ -4,6 +4,7 @@ FROM python:3.10-slim
 
 
 
+
 # Set the working directory in the container
 
 WORKDIR /app
@@ -14,7 +15,8 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-
+RUN apt update && apt upgrade -y
+RUN apt install nano -y
 
 # Install any needed packages specified in requirements.txt
 
