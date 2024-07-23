@@ -1,9 +1,9 @@
+# file: auth.py
 import os
-import asyncio
 import logging
 from enum import Enum
-from telethon import TelegramClient, functions, types
-from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError
 from database import db
 
 logger = logging.getLogger(__name__)
@@ -20,39 +20,18 @@ class AuthState(Enum):
     REQUEST_DESTINATION_CHANNEL = 8
     COMPLETED = 9
 
-# A lock to manage concurrent access to a user's auth state
-user_locks = {}
-
 async def start_auth(event, user_id):
-    if user_id not in user_locks:
-        user_locks[user_id] = asyncio.Lock()
-
-    async with user_locks[user_id]:
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
     await event.reply("Welcome! Let's start the authentication process. Please enter your API ID:")
 
-async def save_api_id(event, user_id):
-    api_id = event.message.text.strip()
-    if not api_id.isdigit():
-        await event.reply("Invalid API ID. Please enter a valid numeric API ID:")
-        return
+async def request_api_hash(event, user_id):
+    # ... (code for requesting and saving the API hash) ...
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_PHONE_NUMBER.value)
+    await event.reply("Please enter your phone number:")
 
-    async with user_locks[user_id]:
-        await db.save_user_credential(user_id, 'api_id', int(api_id))
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_API_HASH.value)
-    await event.reply("Great! Now, please enter your API Hash:")
-
-async def save_api_hash(event, user_id):
-    api_hash = event.message.text.strip()
-    async with user_locks[user_id]:
-        await db.save_user_credential(user_id, 'api_hash', api_hash)
-        await db.set_user_auth_state(user_id, AuthState.REQUEST_PHONE_NUMBER.value)
-    await event.reply("Excellent! Now, please enter your phone number (including country code):")
-
-async def save_phone_number(event, user_id):
-    phone_number = event.message.text.strip()
-    async with user_locks[user_id]:
-        await db.save_user_credential(user_id, 'phone_number', phone_number)
+async def request_phone_number(event, user_id):
+    # ... (code for requesting and saving the phone number) ...
+    await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
     await send_code_request(event, user_id)
 
 async def send_code_request(event, user_id):
@@ -62,58 +41,52 @@ async def send_code_request(event, user_id):
     client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
     try:
-        send_result = await asyncio.wait_for(client.send_code_request(user_data['phone_number']), timeout=30)
-        async with user_locks[user_id]:
-            await db.save_user_credential(user_id, 'phone_code_hash', send_result.phone_code_hash)
-            await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
-        await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
+        send_result = await client.send_code_request(user_data['phone_number'])
+        await db.save_user_credential(user_id, 'phone_code_hash', send_result.phone_code_hash)
+        await event.reply("A code has been sent to your phone. Please enter the code below:",
+                         buttons=[Button.inline("Resend code", data="resend_code")])
     except Exception as e:
         logger.error(f"Error sending code request: {str(e)}")
-        await event.reply(f"Error sending OTP: {str(e)}. Please try again or start over with /start")
+        await event.reply(f"Error sending code request: {str(e)}. Please try again or start over with /start.")
     finally:
         await client.disconnect()
 
 async def authenticate_user(event, user_id):
     otp = event.message.text.strip()
     user_data = await db.get_user_credentials(user_id)
-    
     session_dir = f"sessions/{user_id}"
     os.makedirs(session_dir, exist_ok=True)
     client = TelegramClient(session_dir, user_data['api_id'], user_data['api_hash'])
     await client.connect()
-    
     try:
         logger.info(f"Authenticating user {user_id} with phone_code_hash: {user_data['phone_code_hash']}")
-        await asyncio.wait_for(client.sign_in(
-            phone=user_data['phone_number'],
-            code=otp,
-            phone_code_hash=user_data['phone_code_hash']
-        ), timeout=30)
-        session_string = client.session.save()
-        async with user_locks[user_id]:
+        sign_in_start = await client.sign_in(phone=user_data['phone_number'],
+                                             phone_code_hash=user_data['phone_code_hash'])
+        if not sign_in_start.is_password:
+            await client.sign_in(phone_code=otp)
+            session_string = client.session.save()
             await db.save_user_credential(user_id, 'session_string', session_string)
             await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
-        await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
+            await event.reply("Authentication successful! Now, please enter the source channel username or ID:",
+                             buttons=[Button.inline("Skip", data="skip_channel")])
+        else:
+            await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
+            await event.reply("Two-factor authentication is enabled. Please enter your 2FA password:")
     except PhoneCodeExpiredError:
         logger.error("The confirmation code has expired.")
-        async with user_locks[user_id]:
-            await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
-        await event.reply("The confirmation code has expired. Please use /retry_otp to request a new OTP.")
-    except PhoneCodeInvalidError:
-        logger.error("Invalid OTP entered.")
-        await event.reply("The OTP entered is invalid. Please try again.")
-    except SessionPasswordNeededError:
-        async with user_locks[user_id]:
-            await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
-        await event.reply("Two-factor authentication is enabled. Please enter your 2FA password:")
+        await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
+        await event.reply("The confirmation code has expired. Please enter the code below:",
+                         buttons=[Button.inline("Resend code", data="resend_code")])
     except Exception as e:
         logger.error(f"Error during authentication: {str(e)}")
-        async with user_locks[user_id]:
-            await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
-        await event.reply(f"Authentication failed: {str(e)}. Please try again or use /retry_otp to request a new OTP.")
-    finally:
-        await client.disconnect()
 
+async def handle_otp(event, user_id):
+    otp = event.message.text.strip()
+    if otp.isdigit() and len(otp) == 5:
+        await authenticate_user(event, user_id)
+    else:
+        await event.reply("Invalid code. Please enter the 5-digit code sent to your phone:")
+        
 async def handle_2fa_password(event, user_id):
     password = event.message.text.strip()
     user_data = await db.get_user_credentials(user_id)
