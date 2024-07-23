@@ -53,7 +53,6 @@ async def send_code_request(event, user_id):
     await client.connect()
     try:
         if 'phone_code_hash' in user_data and user_data['phone_code_hash']:
-            # If phone_code_hash exists, use it
             logger.info(f"Reusing existing phone_code_hash for user {user_id}: {user_data['phone_code_hash']}")
             await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
             await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
