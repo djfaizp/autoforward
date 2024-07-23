@@ -83,6 +83,29 @@ class Database:
             logger.error(f"Failed to save user credentials: {str(e)}", exc_info=True)
             raise
 
+    async def save_user_credential(self, user_id, key, value):
+        try:
+            if not self.is_valid_user_id(user_id):
+                raise ValueError("Invalid user ID")
+
+            user_id = int(user_id)
+            if key in ['api_id', 'source_channel', 'destination_channel', 'current_id', 'messages_forwarded']:
+                value = int(value)
+
+            users_collection = self.db.users
+            await users_collection.update_one(
+                {'user_id': user_id},
+                {'$set': {key: value}},
+                upsert=True
+            )
+            logger.info(f"Saved {key} for user {user_id}: {value}")
+        except ValueError as e:
+            logger.error(f"Invalid value for {key} for user {user_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to save {key} for user {user_id}: {str(e)}", exc_info=True)
+            raise
+
     async def get_user_credentials(self, user_id):
         try:
             if not self.is_valid_user_id(user_id):
@@ -119,7 +142,7 @@ class Database:
             if not self.is_valid_user_id(user_id):
                 raise ValueError("Invalid user ID")
 
-            await self.save_user_credentials(user_id, {'auth_state': auth_state})
+            await self.save_user_credential(user_id, 'auth_state', auth_state)
             logger.info(f"Set auth state for user {user_id} to {auth_state}")
         except ValueError as e:
             logger.error(f"Invalid user_id: {str(e)}")
@@ -197,3 +220,4 @@ class Database:
         return user_id > 0
 
 db = Database()
+                                  
