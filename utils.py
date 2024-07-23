@@ -1,14 +1,9 @@
-#file: utils.py
+# file: utils.py
 import logging
 from telethon import events, Button
 from auth import (
     start_auth,
-    save_api_id,
-    save_api_hash,
-    save_phone_number,
-    save_source_channel,
-    save_destination_channel,
-    authenticate_user,
+    handle_auth as auth_handler,
     handle_retry_otp,
     AuthState
 )
@@ -31,40 +26,13 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         else:
             await event.reply(
                 "Welcome back! You are already authenticated. Use /help to see available commands.",
-                buttons=[
-                    [Button.inline("Help", b'help')]
-                ]
+                buttons=[Button.inline("Help", b'help')]
             )
         logger.info(f"User data for user {user_id}: {user_data}")
 
     @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/start_forwarding|/stop_forwarding|/status|/retry_otp)'))
     async def handle_auth(event):
-        user_id = event.sender_id
-        if not is_valid_user_id(user_id):
-            logger.info(f"Invalid user ID {user_id}. Skipping auth process.")
-            return
-
-        user_data = await db.get_user_credentials(user_id)
-        if user_data is None:
-            logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
-            return  # Skip processing if no user data is found
-
-        auth_state = user_data.get('auth_state')
-
-        if auth_state == AuthState.REQUEST_API_ID:
-            await save_api_id(event, user_id)
-        elif auth_state == AuthState.REQUEST_API_HASH:
-            await save_api_hash(event, user_id)
-        elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
-            await save_phone_number(event, user_id)
-        elif auth_state in [AuthState.OTP_SENT, AuthState.VERIFY_OTP]:
-            await authenticate_user(event, user_id)
-        elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
-            await save_source_channel(event, user_id)
-        elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
-            await save_destination_channel(event, user_id)
-        else:
-            await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
+        await auth_handler(event)
 
     @bot.on(events.NewMessage(pattern='/start_forwarding'))
     async def start_forwarding_command(event):
@@ -147,4 +115,4 @@ def setup_commands(bot, user_client, forwarder: Forwarder):
         return user_id > 0
 
     logger.info("Commands set up successfully")
-
+    
