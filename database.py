@@ -114,6 +114,20 @@ class Database:
             logger.error(f"Failed to get user credentials: {str(e)}", exc_info=True)
             raise
 
+    async def set_user_auth_state(self, user_id, auth_state):
+        try:
+            if not self.is_valid_user_id(user_id):
+                raise ValueError("Invalid user ID")
+
+            await self.save_user_credentials(user_id, {'auth_state': auth_state})
+            logger.info(f"Set auth state for user {user_id} to {auth_state}")
+        except ValueError as e:
+            logger.error(f"Invalid user_id: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to set auth state for user {user_id}: {str(e)}", exc_info=True)
+            raise
+
     async def mark_message_as_forwarded(self, user_id, message_id):
         try:
             forwarded_messages = self.db.forwarded_messages
@@ -183,4 +197,3 @@ class Database:
         return user_id > 0
 
 db = Database()
-            
