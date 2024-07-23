@@ -1,151 +1,148 @@
-#file: auth.py
+# file: auth.py
 import logging
-from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, PhoneNumberInvalidError, PhoneCodeInvalidError, PhoneCodeExpiredError
-from telethon.tl.functions.auth import SendCodeRequest, SignInRequest
-from telethon.sessions import StringSession
+from enum import Enum
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
 from database import db
 
 logger = logging.getLogger(__name__)
 
-class AuthState:
-    INITIAL = 'INITIAL'
-    REQUEST_API_ID = 'REQUEST_API_ID'
-    REQUEST_API_HASH = 'REQUEST_API_HASH'
-    REQUEST_PHONE_NUMBER = 'REQUEST_PHONE_NUMBER'
-    OTP_SENT = 'OTP_SENT'
-    VERIFY_OTP = 'VERIFY_OTP'
-    FINALIZE = 'FINALIZE'
+class AuthState(Enum):
+    INITIAL = 0
+    REQUEST_API_ID = 1
+    REQUEST_API_HASH = 2
+    REQUEST_PHONE_NUMBER = 3
+    OTP_SENT = 4
+    VERIFY_OTP = 5
+    REQUEST_2FA_PASSWORD = 6
+    REQUEST_SOURCE_CHANNEL = 7
+    REQUEST_DESTINATION_CHANNEL = 8
+    COMPLETED = 9
 
-class AuthManager:
-    def __init__(self, bot):
-        self.bot = bot
-        self.clients = {}  # Store active TelegramClient instances
+async def start_auth(event, user_id):
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_API_ID.value)
+    await event.reply("Welcome! Let's start the authentication process. Please enter your API ID:")
 
-    async def start_auth(self, event, user_id):
-        await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_API_ID})
-        await event.reply("Welcome! Please provide your Telegram API ID.")
+async def save_api_id(event, user_id):
+    api_id = event.message.text.strip()
+    if not api_id.isdigit():
+        await event.reply("Invalid API ID. Please enter a valid numeric API ID:")
+        return
 
-    async def handle_auth_step(self, event, user_id):
-        user_data = await db.get_user_credentials(user_id)
-        auth_state = user_data.get('auth_state', AuthState.INITIAL)
+    await db.save_user_credential(user_id, 'api_id', int(api_id))
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_API_HASH.value)
+    await event.reply("Great! Now, please enter your API Hash:")
 
-        handlers = {
-            AuthState.REQUEST_API_ID: self.save_api_id,
-            AuthState.REQUEST_API_HASH: self.save_api_hash,
-            AuthState.REQUEST_PHONE_NUMBER: self.save_phone_number,
-            AuthState.VERIFY_OTP: self.verify_otp,
-        }
+async def save_api_hash(event, user_id):
+    api_hash = event.message.text.strip()
+    await db.save_user_credential(user_id, 'api_hash', api_hash)
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_PHONE_NUMBER.value)
+    await event.reply("Excellent! Now, please enter your phone number (including country code):")
 
-        handler = handlers.get(auth_state)
-        if handler:
-            await handler(event, user_id, user_data)
-        else:
-            await event.reply("Unexpected state. Please start over with /start")
+async def save_phone_number(event, user_id):
+    phone_number = event.message.text.strip()
+    await db.save_user_credential(user_id, 'phone_number', phone_number)
+    await send_code_request(event, user_id)
 
-    async def save_api_id(self, event, user_id, user_data):
-        api_id = event.message.message
-        await db.save_user_credentials(user_id, {'api_id': api_id, 'auth_state': AuthState.REQUEST_API_HASH})
-        await event.reply("Got it! Now, please provide your Telegram API Hash.")
+async def send_code_request(event, user_id):
+    user_data = await db.get_user_credentials(user_id)
+    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    await client.connect()
+    try:
+        send_result = await client.send_code_request(user_data['phone_number'])
+        await db.save_user_credential(user_id, 'phone_code_hash', send_result.phone_code_hash)
+        await db.set_user_auth_state(user_id, AuthState.OTP_SENT.value)
+        await event.reply("An OTP has been sent to your phone number. Please enter the OTP:")
+    except Exception as e:
+        logger.error(f"Error sending code request: {str(e)}")
+        await event.reply(f"Error sending OTP: {str(e)}. Please try again or start over with /start")
+    finally:
+        await client.disconnect()
 
-    async def save_api_hash(self, event, user_id, user_data):
-        api_hash = event.message.message
-        await db.save_user_credentials(user_id, {'api_hash': api_hash, 'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-        await event.reply("Thank you! Please provide your phone number (with country code).")
-
-    async def save_phone_number(event, user_id):
-        phone_number = event.message.text.strip()
-        user_data = await db.get_user_credentials(user_id)
-        api_id = user_data.get('api_id')
-        api_hash = user_data.get('api_hash')
+async def authenticate_user(event, user_id):
+    otp = event.message.text.strip()
+    user_data = await db.get_user_credentials(user_id)
     
-        client = TelegramClient(StringSession(), api_id, api_hash)
-        await client.connect()
+    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    await client.connect()
     
-        try:
-            result = await client.send_code_request(phone_number)
-            await db.save_user_credentials(user_id, {
-                'phone_number': phone_number,
-                'phone_code_hash': result.phone_code_hash,
-                'auth_state': AuthState.OTP_SENT
-            })
-            await event.reply("OTP sent to your phone number. Please provide the OTP.")
-        except Exception as e:
-            logger.error(f"Error sending OTP: {str(e)}")
-            await event.reply("An error occurred while sending the OTP. Please try again.")
-        finally:
-            await client.disconnect()
+    try:
+        await client.sign_in(
+            phone=user_data['phone_number'],
+            code=otp,
+            phone_code_hash=user_data.get('phone_code_hash')
+        )
+        session_string = client.session.save()
+        await db.save_user_credential(user_id, 'session_string', session_string)
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
+        await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
+    except SessionPasswordNeededError:
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_2FA_PASSWORD.value)
+        await event.reply("Two-factor authentication is enabled. Please enter your 2FA password:")
+    except Exception as e:
+        logger.error(f"Error during authentication: {str(e)}")
+        await db.set_user_auth_state(user_id, AuthState.VERIFY_OTP.value)
+        await event.reply(f"Authentication failed: {str(e)}. Please try again or use /retry_otp to request a new OTP.")
+    finally:
+        await client.disconnect()
 
-    async def verify_otp(self, event, user_id, user_data):
-        otp = event.message.message
-        phone_number = user_data.get('phone_number')
-        phone_code_hash = user_data.get('phone_code_hash')
-
-        client = self.clients.get(user_id)
-        if not client:
-            await event.reply("Session expired. Please start over with /start")
-            return
-
-        try:
-            await client.sign_in(phone=phone_number, code=otp, phone_code_hash=phone_code_hash)
-            session_string = client.session.save()
-            await db.save_user_credentials(user_id, {'session_string': session_string, 'auth_state': AuthState.FINALIZE})
-            await event.reply("Authentication successful! You can now use the bot's features.")
-        except PhoneCodeInvalidError:
-            await event.reply("The OTP is invalid. Please check and enter again.")
-        except PhoneCodeExpiredError:
-            await event.reply("The OTP has expired. Please request a new one by sending /retry_otp.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.VERIFY_OTP})
-        except SessionPasswordNeededError:
-            await event.reply("Two-factor authentication is enabled. Please disable it temporarily to use this bot.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.REQUEST_PHONE_NUMBER})
-        except Exception as e:
-            logger.error(f"Unexpected error in verify_otp: {str(e)}", exc_info=True)
-            await event.reply("An error occurred. Please try again or contact support.")
-            await db.save_user_credentials(user_id, {'auth_state': AuthState.VERIFY_OTP})
-        finally:
-            await self.disconnect_client(user_id)
-
-    async def retry_otp(self, event, user_id):
-        user_data = await db.get_user_credentials(user_id)
-        phone_number = user_data.get('phone_number')
-
-        client = self.clients.get(user_id)
-        if not client:
-            await event.reply("Session expired. Please start over with /start")
-            return
-
-        try:
-            result = await client(SendCodeRequest(phone_number))
-            await db.save_user_credentials(user_id, {
-                'phone_code_hash': result.phone_code_hash,
-                'auth_state': AuthState.VERIFY_OTP
-            })
-            await event.reply("New OTP sent to your phone number. Please provide the OTP.")
-        except Exception as e:
-            logger.error(f"Unexpected error in retry_otp: {str(e)}", exc_info=True)
-            await event.reply("An error occurred while sending the OTP. Please try again or contact support.")
-            await self.disconnect_client(user_id)
-
-    async def disconnect_client(self, user_id):
-        client = self.clients.pop(user_id, None)
-        if client:
-            await client.disconnect()
-
-def setup_auth_handlers(bot):
-    auth_manager = AuthManager(bot)
-
-    @bot.on(events.NewMessage(pattern='/start'))
-    async def start_command(event):
-        await auth_manager.start_auth(event, event.sender_id)
-
-    @bot.on(events.NewMessage(pattern=r'^(?!/start|/help|/retry_otp)'))
-    async def handle_auth(event):
-        await auth_manager.handle_auth_step(event, event.sender_id)
-
-    @bot.on(events.NewMessage(pattern='/retry_otp'))
-    async def handle_retry_otp(event):
-        await auth_manager.retry_otp(event, event.sender_id)
-
-    logger.info("Authentication handlers set up successfully")
+async def handle_2fa_password(event, user_id):
+    password = event.message.text.strip()
+    user_data = await db.get_user_credentials(user_id)
     
+    client = TelegramClient(f"sessions/{user_id}", user_data['api_id'], user_data['api_hash'])
+    await client.connect()
+    
+    try:
+        await client.sign_in(password=password)
+        session_string = client.session.save()
+        await db.save_user_credential(user_id, 'session_string', session_string)
+        await db.set_user_auth_state(user_id, AuthState.REQUEST_SOURCE_CHANNEL.value)
+        await event.reply("Authentication successful! Now, please enter the source channel username or ID:")
+    except Exception as e:
+        logger.error(f"Error during 2FA authentication: {str(e)}")
+        await event.reply(f"2FA authentication failed: {str(e)}. Please try again.")
+    finally:
+        await client.disconnect()
+
+async def save_source_channel(event, user_id):
+    source_channel = event.message.text.strip()
+    await db.save_user_credential(user_id, 'source_channel', source_channel)
+    await db.set_user_auth_state(user_id, AuthState.REQUEST_DESTINATION_CHANNEL.value)
+    await event.reply("Source channel saved. Now, please enter the destination channel username or ID:")
+
+async def save_destination_channel(event, user_id):
+    destination_channel = event.message.text.strip()
+    await db.save_user_credential(user_id, 'destination_channel', destination_channel)
+    await db.set_user_auth_state(user_id, AuthState.COMPLETED.value)
+    await event.reply("Destination channel saved. Authentication process completed. You can now use /start_forwarding to begin forwarding messages.")
+
+async def handle_retry_otp(event, user_id):
+    await send_code_request(event, user_id)
+
+async def handle_auth(event):
+    user_id = event.sender_id
+    user_data = await db.get_user_credentials(user_id)
+    if user_data is None:
+        logger.info(f"No user data found for user ID {user_id}. Skipping auth process.")
+        return  # Skip processing if no user data is found
+
+    auth_state = AuthState(user_data.get('auth_state', 0))
+
+    if auth_state == AuthState.REQUEST_API_ID:
+        await save_api_id(event, user_id)
+    elif auth_state == AuthState.REQUEST_API_HASH:
+        await save_api_hash(event, user_id)
+    elif auth_state == AuthState.REQUEST_PHONE_NUMBER:
+        await save_phone_number(event, user_id)
+    elif auth_state in [AuthState.OTP_SENT, AuthState.VERIFY_OTP]:
+        await authenticate_user(event, user_id)
+    elif auth_state == AuthState.REQUEST_2FA_PASSWORD:
+        await handle_2fa_password(event, user_id)
+    elif auth_state == AuthState.REQUEST_SOURCE_CHANNEL:
+        await save_source_channel(event, user_id)
+    elif auth_state == AuthState.REQUEST_DESTINATION_CHANNEL:
+        await save_destination_channel(event, user_id)
+    else:
+        await event.reply("I'm not sure what you're trying to do. Please use /help for available commands.")
+        
